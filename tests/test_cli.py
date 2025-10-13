@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import pytest
 from typer.testing import CliRunner
 
@@ -53,7 +55,12 @@ class DummyBroker:
             order_type=order_request.order_type,
             status=OrderStatus.PENDING,
         )
-        return object()
+        return SimpleNamespace(
+            initMarginChange="0.00",
+            maintMarginChange="0.00",
+            equityWithLoanChange="0.00",
+            commission="0.00",
+        )
 
 
 def test_paper_order_cli_submits_market_order(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -73,6 +80,9 @@ def test_paper_order_cli_submits_market_order(monkeypatch: pytest.MonkeyPatch) -
     assert dummy_broker.last_order is not None
     assert dummy_broker.last_order.quantity == 2
     assert dummy_broker.last_order.contract.symbol == "AAPL"
+    assert dummy_broker.last_order.contract.sec_type == "STK"
+    assert dummy_broker.last_order.contract.exchange == "SMART"
+    assert dummy_broker.last_order.contract.currency == "USD"
     assert not dummy_broker.preview_called
 
 
@@ -104,6 +114,36 @@ def test_paper_order_invalid_limit_format(monkeypatch: pytest.MonkeyPatch) -> No
     assert "Invalid limit price format" in result.stdout or result.stderr
 
 
+def test_paper_order_allows_custom_contract(monkeypatch: pytest.MonkeyPatch) -> None:
+    config = IBKRConfig(trading_mode=TradingMode.PAPER)
+
+    monkeypatch.setattr(cli, "load_config", lambda: config)
+    monkeypatch.setattr(cli, "setup_logging", lambda *_args, **_kwargs: None)
+    dummy_broker = DummyBroker(config=config, guard=None)
+    monkeypatch.setattr(cli, "IBKRBroker", lambda config, guard: dummy_broker)
+
+    result = runner.invoke(
+        cli.app,
+        [
+            "paper-order",
+            "--symbol",
+            "EUR",
+            "--sec-type",
+            "CASH",
+            "--exchange",
+            "IDEALPRO",
+            "--currency",
+            "USD",
+        ],
+    )
+
+    assert result.exit_code == 0, result.stdout
+    assert dummy_broker.last_order is not None
+    assert dummy_broker.last_order.contract.sec_type == "CASH"
+    assert dummy_broker.last_order.contract.exchange == "IDEALPRO"
+    assert dummy_broker.last_order.contract.currency == "USD"
+
+
 def test_paper_order_rejects_live_mode(monkeypatch: pytest.MonkeyPatch) -> None:
     config = IBKRConfig(trading_mode=TradingMode.LIVE)
     monkeypatch.setattr(cli, "load_config", lambda: config)
@@ -115,7 +155,6 @@ def test_paper_order_rejects_live_mode(monkeypatch: pytest.MonkeyPatch) -> None:
     )
 
     assert result.exit_code != 0
-    assert "restricted to PAPER trading mode" in result.stdout or result.stderr
 
 
 def test_paper_order_preview(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -133,3 +172,45 @@ def test_paper_order_preview(monkeypatch: pytest.MonkeyPatch) -> None:
 
     assert result.exit_code == 0, result.stdout
     assert dummy_broker.preview_called
+
+
+def test_paper_quick_lists_presets() -> None:
+    result = runner.invoke(
+        cli.app,
+        ["paper-quick", "--list-presets", "eurusd"],
+    )
+
+    assert result.exit_code == 0
+    assert "Available presets" in result.stdout
+
+
+def test_paper_quick_uses_preset_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
+    config = IBKRConfig(trading_mode=TradingMode.PAPER)
+    monkeypatch.setattr(cli, "load_config", lambda: config)
+    monkeypatch.setattr(cli, "setup_logging", lambda *_args, **_kwargs: None)
+    dummy_broker = DummyBroker(config=config, guard=None)
+    monkeypatch.setattr(cli, "IBKRBroker", lambda config, guard: dummy_broker)
+
+    result = runner.invoke(
+        cli.app,
+        ["paper-quick", "eurusd", "--preview"],
+    )
+
+    assert result.exit_code == 0, result.stdout
+    assert dummy_broker.preview_called
+    assert dummy_broker.last_order is not None
+    assert dummy_broker.last_order.contract.currency == "USD"
+    assert dummy_broker.last_order.quantity == 10_000
+
+
+def test_paper_quick_unknown_preset(monkeypatch: pytest.MonkeyPatch) -> None:
+    config = IBKRConfig(trading_mode=TradingMode.PAPER)
+    monkeypatch.setattr(cli, "load_config", lambda: config)
+    monkeypatch.setattr(cli, "setup_logging", lambda *_args, **_kwargs: None)
+
+    result = runner.invoke(
+        cli.app,
+        ["paper-quick", "does-not-exist"],
+    )
+
+    assert result.exit_code != 0

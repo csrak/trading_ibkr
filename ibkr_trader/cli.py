@@ -11,6 +11,7 @@ from loguru import logger
 from ibkr_trader.broker import IBKRBroker
 from ibkr_trader.config import TradingMode, load_config
 from ibkr_trader.models import OrderRequest, OrderSide, OrderType, SymbolContract
+from ibkr_trader.presets import get_preset, preset_names
 from ibkr_trader.safety import LiveTradingGuard
 from ibkr_trader.strategy import SMAConfig, SimpleMovingAverageStrategy
 
@@ -231,7 +232,7 @@ async def run_strategy(
 async def submit_single_order(
     config: "IBKRConfig",  # noqa: F821
     guard: LiveTradingGuard,
-    symbol: str,
+    contract: SymbolContract,
     side: OrderSide,
     quantity: int,
     order_type: OrderType,
@@ -246,7 +247,7 @@ async def submit_single_order(
         await broker.connect()
 
         order_request = OrderRequest(
-            contract=SymbolContract(symbol=symbol),
+            contract=contract,
             side=side,
             quantity=quantity,
             order_type=order_type,
@@ -257,10 +258,11 @@ async def submit_single_order(
         if preview:
             order_state = await broker.preview_order(order_request)
             logger.info(
-                "Preview complete - Commission: %s, InitMargin: %s, MaintenanceMargin: %s",
-                getattr(order_state, "commission", "N/A"),
-                order_state.initMarginChange,
-                order_state.maintMarginChange,
+                "Preview complete - Commission={commission}, InitMargin={init}, "
+                "MaintenanceMargin={maint}",
+                commission=getattr(order_state, "commission", "N/A"),
+                init=order_state.initMarginChange,
+                maint=order_state.maintMarginChange,
             )
         else:
             result = await broker.place_order(order_request)
@@ -342,6 +344,21 @@ def paper_order(
         "-t",
         help="Order type (MARKET/LIMIT/STOP/STOP_LIMIT)",
     ),
+    sec_type: str = typer.Option(
+        "STK",
+        "--sec-type",
+        help="Security type (e.g. STK, FUT, CASH, OPT).",
+    ),
+    exchange: str = typer.Option(
+        "SMART",
+        "--exchange",
+        help="Exchange or routing destination (e.g. SMART, IDEALPRO).",
+    ),
+    currency: str = typer.Option(
+        "USD",
+        "--currency",
+        help="Contract currency (e.g. USD, EUR).",
+    ),
     limit_price: str | None = typer.Option(
         None,
         "--limit",
@@ -397,7 +414,12 @@ def paper_order(
             submit_single_order(
                 config=config,
                 guard=guard,
-                symbol=symbol,
+                contract=SymbolContract(
+                    symbol=symbol,
+                    sec_type=sec_type.upper(),
+                    exchange=exchange.upper(),
+                    currency=currency.upper(),
+                ),
                 side=side,
                 quantity=quantity,
                 order_type=order_type,
@@ -408,6 +430,84 @@ def paper_order(
         )
     except Exception as exc:  # pragma: no cover - surface detailed CLI error
         logger.error(f"Failed to submit order: {exc}")
+        raise typer.Exit(code=1) from exc
+
+
+@app.command("paper-quick")
+def paper_quick(
+    preset: str = typer.Argument(
+        ...,
+        help="Preset name for quick trade (use --list-presets to discover).",
+    ),
+    side: OrderSide = typer.Option(
+        OrderSide.BUY,
+        "--side",
+        "-d",
+        help="Order side",
+    ),
+    quantity: int | None = typer.Option(
+        None,
+        "--quantity",
+        "-q",
+        min=1,
+        help="Override preset quantity (defaults to preset value).",
+    ),
+    preview: bool = typer.Option(
+        False,
+        "--preview",
+        help="Run IB what-if preview instead of transmitting the order.",
+    ),
+    list_presets: bool = typer.Option(
+        False,
+        "--list-presets",
+        help="Display available presets and exit.",
+    ),
+) -> None:
+    """Execute a quick preset-based paper trade."""
+    if list_presets:
+        typer.echo("Available presets:")
+        for name in preset_names():
+            typer.echo(f"  - {name}")
+        raise typer.Exit()
+
+    config = load_config()
+    setup_logging(config.log_dir, verbose=False)
+
+    if config.trading_mode != TradingMode.PAPER:
+        logger.error(
+            "paper-quick command is restricted to PAPER trading mode. "
+            "Set IBKR_TRADING_MODE=paper before running this command."
+        )
+        raise typer.Exit(code=1)
+
+    try:
+        preset_obj = get_preset(preset)
+    except KeyError:
+        available = ", ".join(preset_names())
+        logger.error(f"Unknown preset '{preset}'. Available: {available}")
+        raise typer.Exit(code=1)
+
+    contract, effective_quantity = preset_obj.with_quantity(quantity)
+
+    guard = LiveTradingGuard(config=config, live_flag_enabled=False)
+    guard.acknowledge_live_trading()
+
+    try:
+        asyncio.run(
+            submit_single_order(
+                config=config,
+                guard=guard,
+                contract=contract,
+                side=side,
+                quantity=effective_quantity,
+                order_type=OrderType.MARKET,
+                limit_price=None,
+                stop_price=None,
+                preview=preview,
+            )
+        )
+    except Exception as exc:  # pragma: no cover - surface detailed CLI error
+        logger.error(f"Failed to submit preset order: {exc}")
         raise typer.Exit(code=1) from exc
 
 

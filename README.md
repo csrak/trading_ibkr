@@ -86,6 +86,13 @@ ibkr-trader status
 # Optional: preview an order without sending it
 ibkr-trader paper-order --symbol AAPL --quantity 1 --preview
 
+# Trade non-US instruments (example: EUR/USD FX via IDEALPRO)
+ibkr-trader paper-order --symbol EUR --sec-type CASH --exchange IDEALPRO --currency USD --quantity 10000 --preview
+
+# Ultra-fast preset trades
+ibkr-trader paper-quick eurusd --preview
+ibkr-trader paper-quick eurusd --side SELL
+
 # Submit a 1-share paper trade market order
 ibkr-trader paper-order --symbol AAPL --quantity 1
 ```

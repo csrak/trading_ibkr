@@ -153,11 +153,11 @@ class IBKRBroker:
         order_state = await self.ib.whatIfOrderAsync(contract, order)
 
         logger.info(
-            "Preview received: initMarginChange=%s, maintMarginChange=%s, "
-            "equityWithLoanChange=%s",
-            order_state.initMarginChange,
-            order_state.maintMarginChange,
-            order_state.equityWithLoanChange,
+            "Preview received: initMarginChange={init}, maintMarginChange={maint}, "
+            "equityWithLoanChange={eq}",
+            init=order_state.initMarginChange,
+            maint=order_state.maintMarginChange,
+            eq=order_state.equityWithLoanChange,
         )
 
         return order_state
