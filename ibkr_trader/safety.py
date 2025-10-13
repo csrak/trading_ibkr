@@ -13,7 +13,7 @@ class LiveTradingError(Exception):
 
 class LiveTradingGuard:
     """Guards against accidental live trading.
-    
+
     This class enforces that live trading can only occur when:
     1. Explicitly enabled via --live CLI flag
     2. Configuration is set to live mode
@@ -22,7 +22,7 @@ class LiveTradingGuard:
 
     def __init__(self, config: IBKRConfig, live_flag_enabled: bool = False) -> None:
         """Initialize the guard.
-        
+
         Args:
             config: IBKR configuration
             live_flag_enabled: Whether --live flag was passed via CLI
@@ -33,7 +33,7 @@ class LiveTradingGuard:
 
     def validate_trading_mode(self) -> None:
         """Validate that trading mode is safe to proceed.
-        
+
         Raises:
             LiveTradingError: If live trading conditions are not met
         """
@@ -42,24 +42,21 @@ class LiveTradingGuard:
                 self._raise_live_trading_error(
                     "Live trading mode detected but --live flag not provided"
                 )
-            
+
             if not self._live_acknowledged:
-                self._raise_live_trading_error(
-                    "Live trading must be explicitly acknowledged"
-                )
-            
+                self._raise_live_trading_error("Live trading must be explicitly acknowledged")
+
             # Additional validation for live port
             if self.config.port == 7497:
                 logger.warning(
-                    "Trading mode is LIVE but port is 7497 (paper port). "
-                    "Check your configuration."
+                    "Trading mode is LIVE but port is 7497 (paper port). Check your configuration."
                 )
 
         logger.info(f"Trading mode validated: {self.config.trading_mode.value}")
 
     def acknowledge_live_trading(self) -> None:
         """Acknowledge live trading after user confirmation.
-        
+
         This should only be called after explicit user confirmation.
         """
         if self.config.trading_mode == TradingMode.LIVE and self.live_flag_enabled:
@@ -70,11 +67,11 @@ class LiveTradingGuard:
 
     def check_order_safety(self, symbol: str, quantity: int) -> None:
         """Validate order parameters against safety limits.
-        
+
         Args:
             symbol: Trading symbol
             quantity: Order quantity
-            
+
         Raises:
             LiveTradingError: If order exceeds safety limits
         """
@@ -86,10 +83,10 @@ class LiveTradingGuard:
 
     def _raise_live_trading_error(self, message: str) -> NoReturn:
         """Raise a live trading error with standard formatting.
-        
+
         Args:
             message: Error message
-            
+
         Raises:
             LiveTradingError: Always
         """

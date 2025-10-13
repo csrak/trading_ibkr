@@ -10,10 +10,12 @@ from loguru import logger
 
 from ibkr_trader.broker import IBKRBroker
 from ibkr_trader.config import TradingMode, load_config
+from ibkr_trader.events import EventBus
+from ibkr_trader.market_data import MarketDataService
 from ibkr_trader.models import OrderRequest, OrderSide, OrderType, SymbolContract
 from ibkr_trader.presets import get_preset, preset_names
 from ibkr_trader.safety import LiveTradingGuard
-from ibkr_trader.strategy import SMAConfig, SimpleMovingAverageStrategy
+from ibkr_trader.strategy import SimpleMovingAverageStrategy, SMAConfig
 
 app = typer.Typer(
     name="ibkr-trader",
@@ -23,25 +25,25 @@ app = typer.Typer(
 
 def setup_logging(log_dir: Path, verbose: bool = False) -> None:
     """Configure loguru logging.
-    
+
     Args:
         log_dir: Directory for log files
         verbose: Enable verbose debug logging
     """
     # Remove default handler
     logger.remove()
-    
+
     # Console handler
     log_level = "DEBUG" if verbose else "INFO"
     logger.add(
         sys.stderr,
         format="<green>{time:YYYY-MM-DD HH:mm:ss}</green> | "
-               "<level>{level: <8}</level> | "
-               "<cyan>{name}</cyan>:<cyan>{function}</cyan> - "
-               "<level>{message}</level>",
+        "<level>{level: <8}</level> | "
+        "<cyan>{name}</cyan>:<cyan>{function}</cyan> - "
+        "<level>{message}</level>",
         level=log_level,
     )
-    
+
     # File handler
     logger.add(
         log_dir / "trader_{time}.log",
@@ -73,7 +75,7 @@ def run(
     slow_period: int = typer.Option(
         20,
         "--slow",
-        "-s",
+        "-w",
         help="Slow SMA period",
     ),
     position_size: int = typer.Option(
@@ -90,9 +92,9 @@ def run(
     ),
 ) -> None:
     """Run the trading strategy.
-    
+
     By default, runs in PAPER TRADING mode (no real money at risk).
-    
+
     To enable live trading, you must:
     1. Set IBKR_TRADING_MODE=live environment variable
     2. Pass --live flag
@@ -101,7 +103,7 @@ def run(
     # Load config
     config = load_config()
     setup_logging(config.log_dir, verbose)
-    
+
     # Display mode prominently
     mode_symbol = "📄" if config.trading_mode == TradingMode.PAPER else "⚠️"
     logger.info("=" * 70)
@@ -110,17 +112,17 @@ def run(
     logger.info(f"Port: {config.port}")
     logger.info(f"Symbols: {', '.join(symbols)}")
     logger.info("=" * 70)
-    
+
     # Initialize safety guard
     guard = LiveTradingGuard(config=config, live_flag_enabled=live)
-    
+
     # Validate trading mode
     try:
         guard.validate_trading_mode()
     except Exception as e:
         logger.error(f"Trading mode validation failed: {e}")
-        raise typer.Exit(code=1)
-    
+        raise typer.Exit(code=1) from None
+
     # Prompt for live trading acknowledgment if needed
     if config.trading_mode == TradingMode.LIVE and live:
         logger.warning("=" * 70)
@@ -128,29 +130,31 @@ def run(
         logger.warning("You are about to trade with REAL MONEY")
         logger.warning("This can result in REAL FINANCIAL LOSS")
         logger.warning("=" * 70)
-        
+
         confirm = typer.confirm(
             "Do you acknowledge the risks and want to proceed with LIVE trading?"
         )
-        
+
         if not confirm:
             logger.info("Live trading cancelled by user")
             raise typer.Exit()
-        
+
         guard.acknowledge_live_trading()
     else:
         # Paper trading - safe to proceed
         guard.acknowledge_live_trading()
-    
+
     # Run the strategy
-    asyncio.run(run_strategy(
-        config=config,
-        guard=guard,
-        symbols=symbols,
-        fast_period=fast_period,
-        slow_period=slow_period,
-        position_size=position_size,
-    ))
+    asyncio.run(
+        run_strategy(
+            config=config,
+            guard=guard,
+            symbols=symbols,
+            fast_period=fast_period,
+            slow_period=slow_period,
+            position_size=position_size,
+        )
+    )
 
 
 async def run_strategy(
@@ -162,7 +166,7 @@ async def run_strategy(
     position_size: int,
 ) -> None:
     """Run the trading strategy asynchronously.
-    
+
     Args:
         config: IBKR configuration
         guard: Trading safety guard
@@ -172,19 +176,22 @@ async def run_strategy(
         position_size: Position size per trade
     """
     # Initialize broker
-    broker = IBKRBroker(config=config, guard=guard)
-    
+    event_bus = EventBus()
+    market_data = MarketDataService(event_bus=event_bus)
+    broker = IBKRBroker(config=config, guard=guard, event_bus=event_bus)
+    strategy: SimpleMovingAverageStrategy | None = None
+
     try:
         # Connect to IBKR
         await broker.connect()
-        
+
         # Display account info
         account_summary = await broker.get_account_summary()
         logger.info(
             f"Account: {account_summary.get('AccountType', 'N/A')} - "
             f"Net Liquidation: ${float(account_summary.get('NetLiquidation', 0)):,.2f}"
         )
-        
+
         # Initialize strategy
         strategy_config = SMAConfig(
             symbols=symbols,
@@ -195,36 +202,40 @@ async def run_strategy(
         strategy = SimpleMovingAverageStrategy(
             config=strategy_config,
             broker=broker,
+            event_bus=event_bus,
         )
-        
+
+        await strategy.start()
+
         logger.info(f"Strategy initialized: {strategy_config.name}")
         logger.info(f"Fast SMA: {fast_period}, Slow SMA: {slow_period}")
         logger.info("Starting price monitoring... (Press Ctrl+C to stop)")
-        
+
         # Simple price monitoring loop (in production, use real-time data)
         # This is a placeholder - you'd integrate with actual market data feed
         counter = 0
         while True:
             counter += 1
-            
+
             # Simulate receiving price data
             # In production, replace with actual market data subscription
             for symbol in symbols:
                 # Placeholder: Generate mock price movements for testing
                 # In production: get real price from broker.ib.reqMktData()
                 mock_price = Decimal("150.0") + Decimal(counter % 20)
-                
-                await strategy.on_bar(symbol=symbol, price=mock_price)
-            
+                await market_data.publish_price(symbol, mock_price)
+
             # Wait before next update
             await asyncio.sleep(5)  # Check every 5 seconds
-            
+
     except KeyboardInterrupt:
         logger.info("Shutting down gracefully...")
     except Exception as e:
         logger.error(f"Error during execution: {e}")
         raise
     finally:
+        if strategy is not None:
+            await strategy.stop()
         await broker.disconnect()
         logger.info("Strategy stopped")
 
@@ -279,7 +290,7 @@ def status() -> None:
     """Check connection status and display account information."""
     config = load_config()
     setup_logging(config.log_dir, verbose=False)
-    
+
     asyncio.run(check_status(config))
 
 
@@ -287,13 +298,13 @@ async def check_status(config: "IBKRConfig") -> None:  # noqa: F821
     """Check status asynchronously."""
     guard = LiveTradingGuard(config=config, live_flag_enabled=False)
     broker = IBKRBroker(config=config, guard=guard)
-    
+
     try:
         await broker.connect()
-        
+
         # Get account summary
         summary = await broker.get_account_summary()
-        
+
         logger.info("=" * 70)
         logger.info("ACCOUNT STATUS")
         logger.info("=" * 70)
@@ -302,7 +313,7 @@ async def check_status(config: "IBKRConfig") -> None:  # noqa: F821
         logger.info(f"Total Cash: ${float(summary.get('TotalCashValue', 0)):,.2f}")
         logger.info(f"Buying Power: ${float(summary.get('BuyingPower', 0)):,.2f}")
         logger.info("=" * 70)
-        
+
         # Get positions
         positions = await broker.get_positions()
         if positions:
@@ -314,10 +325,10 @@ async def check_status(config: "IBKRConfig") -> None:  # noqa: F821
                 )
         else:
             logger.info("\nNo open positions")
-        
+
     except Exception as e:
         logger.error(f"Failed to connect: {e}")
-        raise typer.Exit(code=1)
+        raise typer.Exit(code=1) from None
     finally:
         await broker.disconnect()
 
@@ -485,7 +496,7 @@ def paper_quick(
     except KeyError:
         available = ", ".join(preset_names())
         logger.error(f"Unknown preset '{preset}'. Available: {available}")
-        raise typer.Exit(code=1)
+        raise typer.Exit(code=1) from None
 
     contract, effective_quantity = preset_obj.with_quantity(quantity)
 

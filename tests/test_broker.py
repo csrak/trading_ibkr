@@ -3,13 +3,12 @@
 from __future__ import annotations
 
 import asyncio
+from decimal import Decimal
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-
 from eventkit import Event
-
 from ib_insync import Contract
 
 from ibkr_trader.broker import IBKRBroker
@@ -29,6 +28,7 @@ def _make_ib_mock() -> MagicMock:
     ib_mock.reqPositionsAsync = AsyncMock(return_value=[])
     ib_mock.accountSummaryAsync = AsyncMock(return_value=[])
     ib_mock.whatIfOrderAsync = AsyncMock()
+    ib_mock.sleep = AsyncMock(return_value=None)
     return ib_mock
 
 
@@ -85,7 +85,39 @@ async def test_place_order_qualifies_contract_and_waits_for_ack() -> None:
 
     ib_mock.qualifyContractsAsync.assert_awaited_once()
     ib_mock.placeOrder.assert_called_once()
+    _, placed_order = ib_mock.placeOrder.call_args[0]
+    assert placed_order.orderType == "MKT"
     assert result.order_id == 77
+
+
+@pytest.mark.asyncio
+async def test_stop_limit_order_sets_prices() -> None:
+    config = IBKRConfig()
+    guard = LiveTradingGuard(config=config)
+    ib_mock = _make_ib_mock()
+    trade = _trade_with_id(order_id=88)
+    ib_mock.placeOrder.return_value = trade
+
+    broker = IBKRBroker(config=config, guard=guard, ib_client=ib_mock)
+    await broker.connect()
+
+    order_request = OrderRequest(
+        contract=SymbolContract(symbol="AAPL"),
+        side=OrderSide.SELL,
+        quantity=1,
+        order_type=OrderType.STOP_LIMIT,
+        limit_price=Decimal("150"),
+        stop_price=Decimal("149"),
+        time_in_force="GTC",
+    )
+
+    await broker.place_order(order_request)
+
+    _, placed_order = ib_mock.placeOrder.call_args[0]
+    assert placed_order.orderType == "STP LMT"
+    assert placed_order.lmtPrice == 150.0
+    assert placed_order.auxPrice == 149.0
+    assert placed_order.tif == "GTC"
 
 
 @pytest.mark.asyncio

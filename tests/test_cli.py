@@ -11,7 +11,6 @@ from ibkr_trader import cli
 from ibkr_trader.config import IBKRConfig, TradingMode
 from ibkr_trader.models import OrderRequest, OrderResult, OrderStatus
 
-
 runner = CliRunner()
 
 
@@ -69,7 +68,8 @@ def test_paper_order_cli_submits_market_order(monkeypatch: pytest.MonkeyPatch) -
     monkeypatch.setattr(cli, "load_config", lambda: config)
     monkeypatch.setattr(cli, "setup_logging", lambda *_args, **_kwargs: None)
     dummy_broker = DummyBroker(config=config, guard=None)
-    monkeypatch.setattr(cli, "IBKRBroker", lambda config, guard: dummy_broker)
+    monkeypatch.setattr(cli, "IBKRBroker", lambda config, guard, event_bus=None: dummy_broker)
+    monkeypatch.setattr(cli, "MarketDataService", lambda event_bus: None)
 
     result = runner.invoke(
         cli.app,
@@ -120,7 +120,8 @@ def test_paper_order_allows_custom_contract(monkeypatch: pytest.MonkeyPatch) -> 
     monkeypatch.setattr(cli, "load_config", lambda: config)
     monkeypatch.setattr(cli, "setup_logging", lambda *_args, **_kwargs: None)
     dummy_broker = DummyBroker(config=config, guard=None)
-    monkeypatch.setattr(cli, "IBKRBroker", lambda config, guard: dummy_broker)
+    monkeypatch.setattr(cli, "IBKRBroker", lambda config, guard, event_bus=None: dummy_broker)
+    monkeypatch.setattr(cli, "MarketDataService", lambda event_bus: None)
 
     result = runner.invoke(
         cli.app,
@@ -163,7 +164,8 @@ def test_paper_order_preview(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(cli, "load_config", lambda: config)
     monkeypatch.setattr(cli, "setup_logging", lambda *_args, **_kwargs: None)
     dummy_broker = DummyBroker(config=config, guard=None)
-    monkeypatch.setattr(cli, "IBKRBroker", lambda config, guard: dummy_broker)
+    monkeypatch.setattr(cli, "IBKRBroker", lambda config, guard, event_bus=None: dummy_broker)
+    monkeypatch.setattr(cli, "MarketDataService", lambda event_bus: None)
 
     result = runner.invoke(
         cli.app,
@@ -189,7 +191,8 @@ def test_paper_quick_uses_preset_defaults(monkeypatch: pytest.MonkeyPatch) -> No
     monkeypatch.setattr(cli, "load_config", lambda: config)
     monkeypatch.setattr(cli, "setup_logging", lambda *_args, **_kwargs: None)
     dummy_broker = DummyBroker(config=config, guard=None)
-    monkeypatch.setattr(cli, "IBKRBroker", lambda config, guard: dummy_broker)
+    monkeypatch.setattr(cli, "IBKRBroker", lambda config, guard, event_bus=None: dummy_broker)
+    monkeypatch.setattr(cli, "MarketDataService", lambda event_bus: None)
 
     result = runner.invoke(
         cli.app,

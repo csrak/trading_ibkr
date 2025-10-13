@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass
-from typing import Dict, Iterable
 
 from ibkr_trader.models import SymbolContract
 
@@ -21,7 +21,7 @@ class TradePreset:
         return self.contract, qty
 
 
-_PRESETS: Dict[str, TradePreset] = {
+_PRESETS: dict[str, TradePreset] = {
     "eurusd": TradePreset(
         # TODO: Confirm FX preset once account permissions allow leverage-less conversions.
         contract=SymbolContract(

@@ -5,7 +5,7 @@ from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any
 
-from ib_insync import Contract, IB, LimitOrder, MarketOrder, Order, OrderState, StopOrder
+from ib_insync import IB, Contract, LimitOrder, MarketOrder, Order, OrderState, StopOrder
 from loguru import logger
 
 from ibkr_trader.config import IBKRConfig
@@ -24,7 +24,7 @@ from ibkr_trader.safety import LiveTradingGuard
 
 class IBKRBroker:
     """IBKR broker connection and trading interface.
-    
+
     Handles connection to TWS/Gateway and order execution with safety guards.
     """
 
@@ -36,7 +36,7 @@ class IBKRBroker:
         event_bus: EventBus | None = None,
     ) -> None:
         """Initialize broker connection.
-        
+
         Args:
             config: IBKR configuration
             guard: Trading safety guard
@@ -59,7 +59,7 @@ class IBKRBroker:
             f"Connecting to IBKR at {self.config.host}:{self.config.port} "
             f"(client_id={self.config.client_id})"
         )
-        
+
         try:
             is_connected = await asyncio.wait_for(
                 self.ib.connectAsync(
@@ -69,14 +69,14 @@ class IBKRBroker:
                 ),
                 timeout=timeout,
             )
-        except asyncio.TimeoutError as exc:
+        except TimeoutError as exc:
             raise ConnectionError(
                 f"Timed out connecting to IBKR at {self.config.host}:{self.config.port}"
             ) from exc
 
         if not is_connected or not self.ib.isConnected():
             raise ConnectionError("Failed to establish IBKR connection")
-        
+
         self._connected = True
         logger.info(f"Connected to IBKR - Mode: {self.config.trading_mode.value}")
 
@@ -99,10 +99,10 @@ class IBKRBroker:
 
     def _create_contract(self, symbol_contract: SymbolContract) -> Contract:
         """Create IB contract from symbol contract.
-        
+
         Args:
             symbol_contract: Symbol contract definition
-            
+
         Returns:
             IB Contract object
         """
@@ -115,10 +115,10 @@ class IBKRBroker:
 
     def _create_order(self, order_request: OrderRequest) -> Order:
         """Create IB order from order request.
-        
+
         Args:
             order_request: Order request
-            
+
         Returns:
             IB Order object
         """
@@ -126,13 +126,31 @@ class IBKRBroker:
         quantity = order_request.quantity
 
         if order_request.order_type == OrderType.MARKET:
-            return MarketOrder(action, quantity)
+            order = MarketOrder(action, quantity)
         elif order_request.order_type == OrderType.LIMIT:
-            return LimitOrder(action, quantity, float(order_request.limit_price or 0))
+            if order_request.limit_price is None:
+                raise ValueError("Limit price required for limit orders")
+            order = LimitOrder(action, quantity, float(order_request.limit_price))
         elif order_request.order_type == OrderType.STOP:
-            return StopOrder(action, quantity, float(order_request.stop_price or 0))
+            if order_request.stop_price is None:
+                raise ValueError("Stop price required for stop orders")
+            order = StopOrder(action, quantity, float(order_request.stop_price))
+        elif order_request.order_type == OrderType.STOP_LIMIT:
+            if order_request.stop_price is None or order_request.limit_price is None:
+                raise ValueError("Stop limit orders require both stop and limit prices")
+            order = Order()
+            order.action = action
+            order.orderType = "STP LMT"
+            order.totalQuantity = quantity
+            order.auxPrice = float(order_request.stop_price)
+            order.lmtPrice = float(order_request.limit_price)
         else:
             raise ValueError(f"Unsupported order type: {order_request.order_type}")
+
+        if order_request.time_in_force:
+            order.tif = order_request.time_in_force
+        order.transmit = order_request.transmit
+        return order
 
     async def preview_order(self, order_request: OrderRequest) -> OrderState:
         """Request IBKR what-if (margin) preview for the provided order."""
@@ -169,20 +187,19 @@ class IBKRBroker:
 
     async def place_order(self, order_request: OrderRequest) -> OrderResult:
         """Place an order with safety checks.
-        
+
         Args:
             order_request: Order to place
-            
+
         Returns:
             Order execution result
-            
+
         Raises:
             LiveTradingError: If safety checks fail
         """
         # Safety check
         self.guard.check_order_safety(
-            symbol=order_request.contract.symbol,
-            quantity=order_request.quantity
+            symbol=order_request.contract.symbol, quantity=order_request.quantity
         )
 
         self._ensure_connected()
@@ -192,6 +209,12 @@ class IBKRBroker:
             f"Placing order: {order_request.side.value} {order_request.quantity} "
             f"{order_request.contract.symbol} @ {order_request.order_type.value}"
         )
+        if order_request.limit_price is not None:
+            logger.debug(f"  limit_price={order_request.limit_price}")
+        if order_request.stop_price is not None:
+            logger.debug(f"  stop_price={order_request.stop_price}")
+        if order_request.time_in_force:
+            logger.debug(f"  time_in_force={order_request.time_in_force}")
 
         # Create IB objects
         base_contract = self._create_contract(order_request.contract)
@@ -215,7 +238,7 @@ class IBKRBroker:
             else:
                 # Fall back to short sleep if trade object lacks status events
                 await self.ib.sleep(1)
-        except asyncio.TimeoutError:
+        except TimeoutError:
             logger.warning(
                 "Timed out waiting for order acknowledgement from IBKR "
                 f"(order_id={trade.order.orderId})"
@@ -257,7 +280,7 @@ class IBKRBroker:
 
     async def get_positions(self) -> list[Position]:
         """Get current positions.
-        
+
         Returns:
             List of current positions
         """
@@ -287,7 +310,7 @@ class IBKRBroker:
 
     async def get_account_summary(self) -> dict[str, Any]:
         """Get account summary information.
-        
+
         Returns:
             Dictionary with account values
         """
@@ -303,7 +326,7 @@ class IBKRBroker:
         """Context manager entry."""
         return self
 
-    def __exit__(self, *args: Any) -> None:
+    def __exit__(self, *exc_info: object) -> None:
         """Context manager exit."""
         if self._connected:
             self.ib.disconnect()

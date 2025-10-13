@@ -60,23 +60,23 @@ class OrderRequest(BaseModel):
     order_type: OrderType = Field(default=OrderType.MARKET)
     limit_price: Decimal | None = Field(default=None, description="Limit price for limit orders")
     stop_price: Decimal | None = Field(default=None, description="Stop price for stop orders")
-    
+    time_in_force: str | None = Field(default="DAY", description="Order time-in-force")
+    transmit: bool = Field(default=True, description="Transmit order to market")
+
     @field_validator("limit_price")
     @classmethod
     def validate_limit_price(cls, v: Decimal | None, info: dict) -> Decimal | None:
         """Validate limit price is provided for limit orders."""
-        if info.data.get("order_type") in (OrderType.LIMIT, OrderType.STOP_LIMIT):
-            if v is None:
-                raise ValueError(f"Limit price required for {info.data.get('order_type')}")
+        if info.data.get("order_type") in (OrderType.LIMIT, OrderType.STOP_LIMIT) and v is None:
+            raise ValueError(f"Limit price required for {info.data.get('order_type')}")
         return v
 
     @field_validator("stop_price")
     @classmethod
     def validate_stop_price(cls, v: Decimal | None, info: dict) -> Decimal | None:
         """Validate stop price is provided for stop orders."""
-        if info.data.get("order_type") in (OrderType.STOP, OrderType.STOP_LIMIT):
-            if v is None:
-                raise ValueError(f"Stop price required for {info.data.get('order_type')}")
+        if info.data.get("order_type") in (OrderType.STOP, OrderType.STOP_LIMIT) and v is None:
+            raise ValueError(f"Stop price required for {info.data.get('order_type')}")
         return v
 
 
@@ -93,6 +93,8 @@ class OrderResult(BaseModel):
     avg_fill_price: Decimal = Field(default=Decimal("0"))
     commission: Decimal = Field(default=Decimal("0"))
     timestamp: datetime = Field(default_factory=datetime.now)
+    parent_order_id: int | None = Field(default=None)
+    child_order_ids: list[int] = Field(default_factory=list)
 
 
 class Position(BaseModel):
@@ -125,7 +127,7 @@ class MarketData(BaseModel):
     ask: Decimal | None = Field(default=None)
     last: Decimal | None = Field(default=None)
     volume: int = Field(default=0)
-    
+
     @property
     def mid_price(self) -> Decimal | None:
         """Calculate mid price from bid/ask."""

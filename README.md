@@ -22,9 +22,11 @@ Clean, modular design following best practices:
 
 - **Config**: Pydantic v2 settings with environment variable support
 - **Safety**: `LiveTradingGuard` with multi-layer protection
-- **Broker**: Async IBKR connection manager
-- **Models**: Type-safe Pydantic v2 models for all data
-- **Strategy**: Base class for implementing trading strategies
+- **Broker**: Async IBKR connection manager that also publishes order status events and supports advanced order types
+- **Events**: Lightweight asyncio pub/sub bus keeping market data and order updates decoupled
+- **Market Data**: Service layer for throttled subscriptions and external price feeds
+- **Portfolio**: In-memory portfolio/risk tracking with daily loss and exposure guardrails
+- **Strategy**: Event-driven strategies that subscribe to bus updates and submit orders through a shared context
 - **CLI**: Typer-based command-line interface
 
 ## 📦 Installation
@@ -90,8 +92,8 @@ ibkr-trader paper-order --symbol AAPL --quantity 1 --preview
 ibkr-trader paper-order --symbol EUR --sec-type CASH --exchange IDEALPRO --currency USD --quantity 10000 --preview
 
 # Ultra-fast preset trades
-ibkr-trader paper-quick eurusd --preview
-ibkr-trader paper-quick eurusd --side SELL
+ibkr-trader paper-quick spy --preview
+ibkr-trader paper-quick spy --side SELL
 
 # Submit a 1-share paper trade market order
 ibkr-trader paper-order --symbol AAPL --quantity 1
@@ -144,6 +146,13 @@ Do you acknowledge the risks and want to proceed with LIVE trading? [y/N]:
 
 **Only after all three steps will live trading be enabled.**
 
+### Market Data Costs & Limits
+
+- IBKR charges real-time data per exchange on the linked live account, even if you connect in paper mode.
+- By default the platform only publishes internal mock data; enable real feeds explicitly in configuration if you have paid entitlements.
+- Historical data requests via IBKR count against market data permissions but do not add extra fees; consider free sources (e.g., Yahoo Finance) for backtesting or long lookbacks.
+- Strategies should stay within the exchange’s streaming limits—keep concurrent subscriptions modest to avoid IBKR throttling.
+
 ## 📊 Built-in Strategy: SMA Crossover
 
 A simple moving average crossover strategy for testing:
@@ -177,11 +186,14 @@ pytest tests/test_safety.py
 mypy ibkr_trader
 ```
 
-### Linting
+### Linting & Hooks
 
 ```bash
-ruff check ibkr_trader
-ruff format ibkr_trader
+# Run formatting, linting, and syntax checks
+./linter.sh
+
+# (once per clone) enable project git hooks
+git config core.hooksPath .githooks
 ```
 
 ## 🔧 Creating Custom Strategies

@@ -16,7 +16,7 @@ class TradingMode(str, Enum):
 
 class IBKRConfig(BaseSettings):
     """IBKR connection and trading configuration.
-    
+
     Uses Pydantic v2 settings with environment variable support.
     Defaults to paper trading for safety.
     """
@@ -32,17 +32,16 @@ class IBKRConfig(BaseSettings):
     host: str = Field(default="127.0.0.1", description="TWS/Gateway host")
     port: int = Field(default=7497, description="TWS paper port (7497) or live port (7496)")
     client_id: int = Field(default=1, description="Unique client ID")
-    
+
     # Trading mode
     trading_mode: TradingMode = Field(
-        default=TradingMode.PAPER,
-        description="Trading mode - paper or live"
+        default=TradingMode.PAPER, description="Trading mode - paper or live"
     )
-    
+
     # Safety settings
     max_position_size: int = Field(default=100, description="Maximum position size per symbol")
     max_daily_loss: float = Field(default=1000.0, description="Maximum daily loss in USD")
-    
+
     # Data paths
     data_dir: Path = Field(default=Path("data"), description="Directory for storing data")
     log_dir: Path = Field(default=Path("logs"), description="Directory for logs")

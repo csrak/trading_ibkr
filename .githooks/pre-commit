@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+cd "$REPO_ROOT"
+
+if ! ./linter.sh; then
+  echo "pre-commit: linter checks failed" >&2
+  exit 1
+fi
+
+exit 0

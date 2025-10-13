@@ -4,6 +4,7 @@ __version__ = "0.1.0"
 
 from ibkr_trader.broker import IBKRBroker
 from ibkr_trader.config import IBKRConfig, TradingMode, load_config
+from ibkr_trader.market_data import MarketDataService
 from ibkr_trader.models import (
     OrderRequest,
     OrderResult,
@@ -13,14 +14,16 @@ from ibkr_trader.models import (
     Position,
     SymbolContract,
 )
-from ibkr_trader.safety import LiveTradingGuard, LiveTradingError
-from ibkr_trader.strategy import SMAConfig, SimpleMovingAverageStrategy, Strategy
+from ibkr_trader.portfolio import PortfolioState, RiskGuard
+from ibkr_trader.safety import LiveTradingError, LiveTradingGuard
+from ibkr_trader.strategy import SimpleMovingAverageStrategy, SMAConfig, Strategy
 
 __all__ = [
     "IBKRBroker",
     "IBKRConfig",
     "TradingMode",
     "load_config",
+    "MarketDataService",
     "OrderRequest",
     "OrderResult",
     "OrderSide",
@@ -28,6 +31,8 @@ __all__ = [
     "OrderType",
     "Position",
     "SymbolContract",
+    "PortfolioState",
+    "RiskGuard",
     "LiveTradingGuard",
     "LiveTradingError",
     "Strategy",
