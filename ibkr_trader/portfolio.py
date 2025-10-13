@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime
 from decimal import Decimal
+from pathlib import Path
+from typing import Any
 
 from loguru import logger
 
@@ -27,11 +30,18 @@ class PortfolioSnapshot:
 class PortfolioState:
     """Tracks portfolio state and evaluates risk limits."""
 
-    def __init__(self, max_daily_loss: Decimal) -> None:
+    def __init__(
+        self,
+        max_daily_loss: Decimal,
+        snapshot_path: Path | None = None,
+    ) -> None:
         self.snapshot = PortfolioSnapshot()
         self._max_daily_loss = max_daily_loss
         self._loss_check_date: date | None = None
         self._lock = asyncio.Lock()
+        self._snapshot_path = snapshot_path
+        if snapshot_path is not None:
+            self._load_snapshot(snapshot_path)
 
     async def update_account(self, summary: dict[str, str]) -> None:
         async with self._lock:
@@ -68,6 +78,47 @@ class PortfolioState:
                     f"{self.snapshot.realized_pnl_today} <= -{self._max_daily_loss}"
                 )
                 raise RuntimeError(message)
+
+    def _load_snapshot(self, path: Path) -> None:
+        if not path.exists():
+            return
+        try:
+            data = path.read_text(encoding="utf-8")
+            decoded = json.loads(data)
+            positions = {
+                symbol: Position(**payload)
+                for symbol, payload in decoded.get("positions", {}).items()
+            }
+            self.snapshot = PortfolioSnapshot(
+                positions=positions,
+                net_liquidation=Decimal(decoded.get("net_liquidation", "0")),
+                total_cash=Decimal(decoded.get("total_cash", "0")),
+                buying_power=Decimal(decoded.get("buying_power", "0")),
+                realized_pnl_today=Decimal(decoded.get("realized_pnl_today", "0")),
+            )
+            logger.info("Loaded portfolio snapshot from %s", path)
+        except Exception as exc:  # pragma: no cover - only on IO failure
+            logger.warning("Failed to load portfolio snapshot: %s", exc)
+
+    async def persist(self) -> None:
+        if self._snapshot_path is None:
+            return
+        async with self._lock:
+            data: dict[str, Any] = {
+                "net_liquidation": str(self.snapshot.net_liquidation),
+                "total_cash": str(self.snapshot.total_cash),
+                "buying_power": str(self.snapshot.buying_power),
+                "realized_pnl_today": str(self.snapshot.realized_pnl_today),
+                "positions": {
+                    symbol: position.model_dump()
+                    for symbol, position in self.snapshot.positions.items()
+                },
+            }
+        try:
+            self._snapshot_path.parent.mkdir(parents=True, exist_ok=True)
+            self._snapshot_path.write_text(json.dumps(data, indent=2), encoding="utf-8")
+        except Exception as exc:  # pragma: no cover - only on IO failure
+            logger.warning("Failed to persist portfolio snapshot: %s", exc)
 
 
 class RiskGuard:

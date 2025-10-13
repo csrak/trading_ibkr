@@ -5,6 +5,7 @@ __version__ = "0.1.0"
 from ibkr_trader.broker import IBKRBroker
 from ibkr_trader.config import IBKRConfig, TradingMode, load_config
 from ibkr_trader.constants import (
+    DEFAULT_PORTFOLIO_SNAPSHOT,
     MOCK_PRICE_BASE,
     MOCK_PRICE_SLEEP_SECONDS,
     MOCK_PRICE_VARIATION_MODULO,
@@ -33,6 +34,7 @@ __all__ = [
     "MOCK_PRICE_BASE",
     "MOCK_PRICE_VARIATION_MODULO",
     "MOCK_PRICE_SLEEP_SECONDS",
+    "DEFAULT_PORTFOLIO_SNAPSHOT",
     "MarketDataService",
     "OrderRequest",
     "OrderResult",

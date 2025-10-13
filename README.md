@@ -25,7 +25,8 @@ Clean, modular design following best practices:
 - **Broker**: Async IBKR connection manager that also publishes order status events and supports advanced order types
 - **Events**: Lightweight asyncio pub/sub bus keeping market data and order updates decoupled
 - **Market Data**: Service layer for throttled subscriptions and external price feeds
-- **Portfolio**: In-memory portfolio/risk tracking with daily loss and exposure guardrails
+- **Portfolio**: In-memory portfolio/risk tracking with daily loss and exposure guardrails,
+  persisted to `data/portfolio_snapshot.json` by default for resilience
 - **Strategy**: Event-driven strategies that subscribe to bus updates and submit orders through a shared context
 - **CLI**: Typer-based command-line interface
 

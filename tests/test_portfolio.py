@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 from decimal import Decimal
+from pathlib import Path
 
 import pytest
 
@@ -68,3 +69,29 @@ async def test_risk_guard_handles_fill_event() -> None:
         timestamp=datetime.now(tz=UTC),
     )
     await guard.handle_order_status(event)
+
+
+@pytest.mark.asyncio
+async def test_portfolio_persist_writes_snapshot(tmp_path: Path) -> None:
+    snapshot_path = tmp_path / "portfolio.json"
+    state = PortfolioState(
+        max_daily_loss=Decimal("1000"),
+        snapshot_path=snapshot_path,
+    )
+
+    await state.update_account(
+        {
+            "NetLiquidation": "50000",
+            "TotalCashValue": "25000",
+            "BuyingPower": "75000",
+        }
+    )
+    await state.persist()
+
+    assert snapshot_path.exists()
+
+    restored = PortfolioState(
+        max_daily_loss=Decimal("1000"),
+        snapshot_path=snapshot_path,
+    )
+    assert restored.snapshot.net_liquidation == Decimal("50000")

@@ -12,6 +12,7 @@ from loguru import logger
 from ibkr_trader.broker import IBKRBroker
 from ibkr_trader.config import TradingMode, load_config
 from ibkr_trader.constants import (
+    DEFAULT_PORTFOLIO_SNAPSHOT,
     MOCK_PRICE_BASE,
     MOCK_PRICE_SLEEP_SECONDS,
     MOCK_PRICE_VARIATION_MODULO,
@@ -185,7 +186,11 @@ async def run_strategy(
     # Initialize broker
     event_bus = EventBus()
     market_data = MarketDataService(event_bus=event_bus)
-    portfolio = PortfolioState(Decimal(str(config.max_daily_loss)))
+    snapshot_path = config.data_dir / DEFAULT_PORTFOLIO_SNAPSHOT.name
+    portfolio = PortfolioState(
+        Decimal(str(config.max_daily_loss)),
+        snapshot_path=snapshot_path,
+    )
     risk_guard = RiskGuard(
         portfolio=portfolio,
         max_exposure=Decimal(str(config.max_order_exposure)),
@@ -210,6 +215,9 @@ async def run_strategy(
             f"Net Liquidation: ${float(account_summary.get('NetLiquidation', 0)):,.2f}"
         )
         await portfolio.update_account(account_summary)
+        positions = await broker.get_positions()
+        await portfolio.update_positions(positions)
+        await portfolio.persist()
 
         # Initialize strategy
         strategy_config = SMAConfig(
@@ -233,6 +241,7 @@ async def run_strategy(
                 async for event in subscription:
                     if isinstance(event, OrderStatusEvent):
                         await risk_guard.handle_order_status(event)
+                        await portfolio.persist()
             except asyncio.CancelledError:
                 raise
 
@@ -455,7 +464,11 @@ def paper_order(
             raise typer.BadParameter("Invalid stop price format.") from exc
 
     guard = LiveTradingGuard(config=config, live_flag_enabled=False)
-    portfolio = PortfolioState(Decimal(str(config.max_daily_loss)))
+    snapshot_path = config.data_dir / DEFAULT_PORTFOLIO_SNAPSHOT.name
+    portfolio = PortfolioState(
+        Decimal(str(config.max_daily_loss)),
+        snapshot_path=snapshot_path,
+    )
     risk_guard = RiskGuard(
         portfolio=portfolio,
         max_exposure=Decimal(str(config.max_order_exposure)),
@@ -544,7 +557,11 @@ def paper_quick(
     contract, effective_quantity = preset_obj.with_quantity(quantity)
 
     guard = LiveTradingGuard(config=config, live_flag_enabled=False)
-    portfolio = PortfolioState(Decimal(str(config.max_daily_loss)))
+    snapshot_path = config.data_dir / DEFAULT_PORTFOLIO_SNAPSHOT.name
+    portfolio = PortfolioState(
+        Decimal(str(config.max_daily_loss)),
+        snapshot_path=snapshot_path,
+    )
     risk_guard = RiskGuard(
         portfolio=portfolio,
         max_exposure=Decimal(str(config.max_order_exposure)),
