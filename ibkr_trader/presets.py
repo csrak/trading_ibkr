@@ -23,6 +23,7 @@ class TradePreset:
 
 _PRESETS: Dict[str, TradePreset] = {
     "eurusd": TradePreset(
+        # TODO: Confirm FX preset once account permissions allow leverage-less conversions.
         contract=SymbolContract(
             symbol="EUR",
             sec_type="CASH",
@@ -32,6 +33,7 @@ _PRESETS: Dict[str, TradePreset] = {
         default_quantity=10_000,
     ),
     "gbpusd": TradePreset(
+        # TODO: Confirm FX preset once account permissions allow leverage-less conversions.
         contract=SymbolContract(
             symbol="GBP",
             sec_type="CASH",

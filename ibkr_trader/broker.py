@@ -1,6 +1,7 @@
 """IBKR broker connection and order management."""
 
 import asyncio
+from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any
 
@@ -8,6 +9,7 @@ from ib_insync import Contract, IB, LimitOrder, MarketOrder, Order, OrderState, 
 from loguru import logger
 
 from ibkr_trader.config import IBKRConfig
+from ibkr_trader.events import EventBus, EventTopic, OrderStatusEvent
 from ibkr_trader.models import (
     OrderRequest,
     OrderResult,
@@ -31,6 +33,7 @@ class IBKRBroker:
         config: IBKRConfig,
         guard: LiveTradingGuard,
         ib_client: IB | None = None,
+        event_bus: EventBus | None = None,
     ) -> None:
         """Initialize broker connection.
         
@@ -38,11 +41,13 @@ class IBKRBroker:
             config: IBKR configuration
             guard: Trading safety guard
             ib_client: Optional injected IB client (primarily for testing)
+            event_bus: Optional event bus for publishing broker events
         """
         self.config = config
         self.guard = guard
         self.ib = ib_client or IB()
         self._connected = False
+        self._event_bus = event_bus
 
     async def connect(self, timeout: float = 10.0) -> None:
         """Connect to IBKR TWS/Gateway."""
@@ -202,13 +207,25 @@ class IBKRBroker:
         # Place order
         trade = self.ib.placeOrder(contract, order)
 
+        status_event = getattr(trade, "statusEvent", None)
+
         try:
-            await asyncio.wait_for(trade.orderStatusEvent, timeout=5)
+            if status_event is not None:
+                await asyncio.wait_for(status_event, timeout=5)
+            else:
+                # Fall back to short sleep if trade object lacks status events
+                await self.ib.sleep(1)
         except asyncio.TimeoutError:
             logger.warning(
                 "Timed out waiting for order acknowledgement from IBKR "
                 f"(order_id={trade.order.orderId})"
             )
+
+        ib_status = trade.orderStatus
+        result_status = self._map_order_status(ib_status.status)
+        filled_quantity = int(getattr(ib_status, "filled", 0) or 0)
+        remaining_quantity = int(getattr(ib_status, "remaining", 0) or 0)
+        avg_fill_price = float(getattr(ib_status, "avgFillPrice", 0.0) or 0.0)
 
         # Create result
         result = OrderResult(
@@ -217,12 +234,25 @@ class IBKRBroker:
             side=order_request.side,
             quantity=order_request.quantity,
             order_type=order_request.order_type,
-            status=OrderStatus.SUBMITTED,
-            filled_quantity=0,
-            avg_fill_price=Decimal("0"),
+            status=result_status,
+            filled_quantity=filled_quantity,
+            avg_fill_price=Decimal(str(avg_fill_price)),
         )
 
         logger.info(f"Order submitted with ID: {result.order_id}")
+
+        await self._publish_order_status(
+            OrderStatusEvent(
+                order_id=result.order_id,
+                status=result_status,
+                contract=order_request.contract,
+                filled=filled_quantity,
+                remaining=remaining_quantity,
+                avg_fill_price=avg_fill_price,
+                timestamp=datetime.now(UTC),
+            )
+        )
+
         return result
 
     async def get_positions(self) -> list[Position]:
@@ -277,3 +307,15 @@ class IBKRBroker:
         """Context manager exit."""
         if self._connected:
             self.ib.disconnect()
+
+    def _map_order_status(self, status: str) -> OrderStatus:
+        try:
+            return OrderStatus(status)
+        except ValueError:
+            logger.debug(f"Unmapped IBKR order status '{status}' - treating as SUBMITTED")
+            return OrderStatus.SUBMITTED
+
+    async def _publish_order_status(self, event: OrderStatusEvent) -> None:
+        if self._event_bus is None:
+            return
+        await self._event_bus.publish(EventTopic.ORDER_STATUS, event)

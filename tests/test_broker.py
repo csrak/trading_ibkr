@@ -8,10 +8,13 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from eventkit import Event
+
 from ib_insync import Contract
 
 from ibkr_trader.broker import IBKRBroker
 from ibkr_trader.config import IBKRConfig
+from ibkr_trader.events import EventBus, EventTopic
 from ibkr_trader.models import OrderRequest, OrderSide, OrderType, SymbolContract
 from ibkr_trader.safety import LiveTradingGuard
 
@@ -31,12 +34,19 @@ def _make_ib_mock() -> MagicMock:
 
 def _trade_with_id(order_id: int = 1001) -> SimpleNamespace:
     loop = asyncio.get_event_loop()
-    future = loop.create_future()
-    future.set_result(None)
-    return SimpleNamespace(
+    status_event = Event("status")
+    trade = SimpleNamespace(
         order=SimpleNamespace(orderId=order_id),
-        orderStatusEvent=future,
+        statusEvent=status_event,
+        orderStatus=SimpleNamespace(
+            status="Submitted",
+            filled=0,
+            remaining=0,
+            avgFillPrice=0.0,
+        ),
     )
+    loop.call_soon(status_event.emit, trade)
+    return trade
 
 
 @pytest.mark.asyncio
@@ -156,3 +166,34 @@ async def test_get_account_summary_returns_dict() -> None:
     ib_mock.accountSummaryAsync.assert_awaited_once()
     assert summary["NetLiquidation"] == "12345.67"
     assert summary["BuyingPower"] == "9876.54"
+
+
+@pytest.mark.asyncio
+async def test_order_event_published_when_event_bus_provided() -> None:
+    config = IBKRConfig()
+    guard = LiveTradingGuard(config=config)
+    ib_mock = _make_ib_mock()
+    trade = _trade_with_id(order_id=55)
+    trade.orderStatus.filled = 1
+    ib_mock.placeOrder.return_value = trade
+
+    event_bus = EventBus()
+    subscription = event_bus.subscribe(EventTopic.ORDER_STATUS)
+
+    broker = IBKRBroker(config=config, guard=guard, ib_client=ib_mock, event_bus=event_bus)
+    await broker.connect()
+
+    order_request = OrderRequest(
+        contract=SymbolContract(symbol="AAPL"),
+        side=OrderSide.BUY,
+        quantity=1,
+        order_type=OrderType.MARKET,
+    )
+
+    await broker.place_order(order_request)
+
+    event = await asyncio.wait_for(subscription.get(), timeout=0.1)
+    assert event.order_id == 55
+    assert event.filled == 1
+    assert event.status.value == "Submitted"
+    subscription.close()
