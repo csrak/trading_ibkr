@@ -4,6 +4,12 @@ __version__ = "0.1.0"
 
 from ibkr_trader.broker import IBKRBroker
 from ibkr_trader.config import IBKRConfig, TradingMode, load_config
+from ibkr_trader.constants import (
+    MOCK_PRICE_BASE,
+    MOCK_PRICE_SLEEP_SECONDS,
+    MOCK_PRICE_VARIATION_MODULO,
+    SUBSCRIPTION_SOFT_LIMIT,
+)
 from ibkr_trader.market_data import MarketDataService
 from ibkr_trader.models import (
     OrderRequest,
@@ -23,6 +29,10 @@ __all__ = [
     "IBKRConfig",
     "TradingMode",
     "load_config",
+    "SUBSCRIPTION_SOFT_LIMIT",
+    "MOCK_PRICE_BASE",
+    "MOCK_PRICE_VARIATION_MODULO",
+    "MOCK_PRICE_SLEEP_SECONDS",
     "MarketDataService",
     "OrderRequest",
     "OrderResult",

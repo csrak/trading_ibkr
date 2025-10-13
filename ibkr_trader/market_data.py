@@ -12,6 +12,7 @@ from decimal import Decimal
 
 from loguru import logger
 
+from ibkr_trader.constants import SUBSCRIPTION_SOFT_LIMIT
 from ibkr_trader.events import EventBus, EventTopic, MarketDataEvent
 from ibkr_trader.models import SymbolContract
 
@@ -47,9 +48,11 @@ class MarketDataService:
         key = request.contract.symbol
         async with self._lock:
             self._active_requests[key] += 1
-            if self._active_requests[key] > 50:
+            if self._active_requests[key] > SUBSCRIPTION_SOFT_LIMIT:
                 logger.warning(
-                    "Market data subscription count for %s exceeded local soft limit", key
+                    "Market data subscription count for %s exceeded local soft limit %s",
+                    key,
+                    SUBSCRIPTION_SOFT_LIMIT,
                 )
         try:
             yield

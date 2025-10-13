@@ -11,6 +11,11 @@ from loguru import logger
 
 from ibkr_trader.broker import IBKRBroker
 from ibkr_trader.config import TradingMode, load_config
+from ibkr_trader.constants import (
+    MOCK_PRICE_BASE,
+    MOCK_PRICE_SLEEP_SECONDS,
+    MOCK_PRICE_VARIATION_MODULO,
+)
 from ibkr_trader.events import EventBus, EventTopic, OrderStatusEvent
 from ibkr_trader.market_data import MarketDataService
 from ibkr_trader.models import OrderRequest, OrderSide, OrderType, SymbolContract
@@ -248,11 +253,11 @@ async def run_strategy(
             for symbol in symbols:
                 # Placeholder: Generate mock price movements for testing
                 # In production: get real price from broker.ib.reqMktData()
-                mock_price = Decimal("150.0") + Decimal(counter % 20)
+                mock_price = MOCK_PRICE_BASE + Decimal(counter % MOCK_PRICE_VARIATION_MODULO)
                 await market_data.publish_price(symbol, mock_price)
 
             # Wait before next update
-            await asyncio.sleep(5)  # Check every 5 seconds
+            await asyncio.sleep(MOCK_PRICE_SLEEP_SECONDS)  # Check periodically
 
     except KeyboardInterrupt:
         logger.info("Shutting down gracefully...")
