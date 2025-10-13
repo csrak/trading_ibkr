@@ -62,6 +62,9 @@ class OrderRequest(BaseModel):
     stop_price: Decimal | None = Field(default=None, description="Stop price for stop orders")
     time_in_force: str | None = Field(default="DAY", description="Order time-in-force")
     transmit: bool = Field(default=True, description="Transmit order to market")
+    expected_price: Decimal | None = Field(
+        default=None, description="Estimated fill price used for risk validation"
+    )
 
     @field_validator("limit_price")
     @classmethod

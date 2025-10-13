@@ -2,6 +2,7 @@
 
 import asyncio
 import sys
+from contextlib import suppress
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
@@ -10,9 +11,10 @@ from loguru import logger
 
 from ibkr_trader.broker import IBKRBroker
 from ibkr_trader.config import TradingMode, load_config
-from ibkr_trader.events import EventBus
+from ibkr_trader.events import EventBus, EventTopic, OrderStatusEvent
 from ibkr_trader.market_data import MarketDataService
 from ibkr_trader.models import OrderRequest, OrderSide, OrderType, SymbolContract
+from ibkr_trader.portfolio import PortfolioState, RiskGuard
 from ibkr_trader.presets import get_preset, preset_names
 from ibkr_trader.safety import LiveTradingGuard
 from ibkr_trader.strategy import SimpleMovingAverageStrategy, SMAConfig
@@ -178,8 +180,19 @@ async def run_strategy(
     # Initialize broker
     event_bus = EventBus()
     market_data = MarketDataService(event_bus=event_bus)
-    broker = IBKRBroker(config=config, guard=guard, event_bus=event_bus)
+    portfolio = PortfolioState(Decimal(str(config.max_daily_loss)))
+    risk_guard = RiskGuard(
+        portfolio=portfolio,
+        max_exposure=Decimal(str(config.max_order_exposure)),
+    )
+    broker = IBKRBroker(
+        config=config,
+        guard=guard,
+        event_bus=event_bus,
+        risk_guard=risk_guard,
+    )
     strategy: SimpleMovingAverageStrategy | None = None
+    order_task: asyncio.Task[None] | None = None
 
     try:
         # Connect to IBKR
@@ -191,6 +204,7 @@ async def run_strategy(
             f"Account: {account_summary.get('AccountType', 'N/A')} - "
             f"Net Liquidation: ${float(account_summary.get('NetLiquidation', 0)):,.2f}"
         )
+        await portfolio.update_account(account_summary)
 
         # Initialize strategy
         strategy_config = SMAConfig(
@@ -203,9 +217,21 @@ async def run_strategy(
             config=strategy_config,
             broker=broker,
             event_bus=event_bus,
+            risk_guard=risk_guard,
         )
 
         await strategy.start()
+
+        async def order_status_listener() -> None:
+            subscription = event_bus.subscribe(EventTopic.ORDER_STATUS)
+            try:
+                async for event in subscription:
+                    if isinstance(event, OrderStatusEvent):
+                        await risk_guard.handle_order_status(event)
+            except asyncio.CancelledError:
+                raise
+
+        order_task = asyncio.create_task(order_status_listener())
 
         logger.info(f"Strategy initialized: {strategy_config.name}")
         logger.info(f"Fast SMA: {fast_period}, Slow SMA: {slow_period}")
@@ -236,6 +262,10 @@ async def run_strategy(
     finally:
         if strategy is not None:
             await strategy.stop()
+        if order_task is not None:
+            order_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await order_task
         await broker.disconnect()
         logger.info("Strategy stopped")
 
@@ -250,9 +280,10 @@ async def submit_single_order(
     limit_price: Decimal | None,
     stop_price: Decimal | None,
     preview: bool,
+    risk_guard: RiskGuard,
 ) -> None:
     """Submit a single order for connectivity testing."""
-    broker = IBKRBroker(config=config, guard=guard)
+    broker = IBKRBroker(config=config, guard=guard, risk_guard=risk_guard)
 
     try:
         await broker.connect()
@@ -264,6 +295,7 @@ async def submit_single_order(
             order_type=order_type,
             limit_price=limit_price,
             stop_price=stop_price,
+            expected_price=limit_price or stop_price,
         )
 
         if preview:
@@ -418,6 +450,11 @@ def paper_order(
             raise typer.BadParameter("Invalid stop price format.") from exc
 
     guard = LiveTradingGuard(config=config, live_flag_enabled=False)
+    portfolio = PortfolioState(Decimal(str(config.max_daily_loss)))
+    risk_guard = RiskGuard(
+        portfolio=portfolio,
+        max_exposure=Decimal(str(config.max_order_exposure)),
+    )
     guard.acknowledge_live_trading()
 
     try:
@@ -437,6 +474,7 @@ def paper_order(
                 limit_price=limit_decimal,
                 stop_price=stop_decimal,
                 preview=preview,
+                risk_guard=risk_guard,
             )
         )
     except Exception as exc:  # pragma: no cover - surface detailed CLI error
@@ -501,6 +539,11 @@ def paper_quick(
     contract, effective_quantity = preset_obj.with_quantity(quantity)
 
     guard = LiveTradingGuard(config=config, live_flag_enabled=False)
+    portfolio = PortfolioState(Decimal(str(config.max_daily_loss)))
+    risk_guard = RiskGuard(
+        portfolio=portfolio,
+        max_exposure=Decimal(str(config.max_order_exposure)),
+    )
     guard.acknowledge_live_trading()
 
     try:
@@ -515,6 +558,7 @@ def paper_quick(
                 limit_price=None,
                 stop_price=None,
                 preview=preview,
+                risk_guard=risk_guard,
             )
         )
     except Exception as exc:  # pragma: no cover - surface detailed CLI error

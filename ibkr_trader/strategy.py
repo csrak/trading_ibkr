@@ -14,6 +14,7 @@ from pydantic import BaseModel, Field
 from ibkr_trader.broker import IBKRBroker
 from ibkr_trader.events import EventBus, EventSubscription, EventTopic, MarketDataEvent
 from ibkr_trader.models import OrderRequest, OrderSide, OrderType, SymbolContract
+from ibkr_trader.portfolio import RiskGuard
 
 
 class StrategyConfig(BaseModel):
@@ -31,7 +32,13 @@ class Strategy(ABC):
     react to incoming updates by implementing ``on_bar``.
     """
 
-    def __init__(self, config: StrategyConfig, broker: IBKRBroker, event_bus: EventBus) -> None:
+    def __init__(
+        self,
+        config: StrategyConfig,
+        broker: IBKRBroker,
+        event_bus: EventBus,
+        risk_guard: RiskGuard | None = None,
+    ) -> None:
         """Initialize strategy.
 
         Args:
@@ -42,10 +49,12 @@ class Strategy(ABC):
         self.config = config
         self.broker = broker
         self.event_bus = event_bus
+        self.risk_guard = risk_guard
         self._positions: dict[str, int] = {}
         self._symbols = {symbol.upper() for symbol in config.symbols}
         self._subscription: EventSubscription[MarketDataEvent] | None = None
         self._task: asyncio.Task[None] | None = None
+        self._last_prices: dict[str, Decimal] = {}
 
     @abstractmethod
     async def on_bar(self, symbol: str, price: Decimal) -> None:
@@ -90,6 +99,7 @@ class Strategy(ABC):
                 price = (
                     event.price if isinstance(event.price, Decimal) else Decimal(str(event.price))
                 )
+                self._last_prices[symbol] = price
                 await self.on_bar(symbol, price)
         except asyncio.CancelledError:
             raise
@@ -118,11 +128,13 @@ class Strategy(ABC):
             quantity: Order quantity
         """
         contract = SymbolContract(symbol=symbol)
+        expected_price = self._last_prices.get(symbol)
         order_request = OrderRequest(
             contract=contract,
             side=side,
             quantity=quantity,
             order_type=OrderType.MARKET,
+            expected_price=expected_price,
         )
 
         result = await self.broker.place_order(order_request)

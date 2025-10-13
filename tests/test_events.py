@@ -8,7 +8,7 @@ from datetime import UTC, datetime
 import pytest
 
 from ibkr_trader.events import EventBus, EventTopic, OrderStatusEvent
-from ibkr_trader.models import OrderStatus, SymbolContract
+from ibkr_trader.models import OrderSide, OrderStatus, SymbolContract
 
 
 @pytest.mark.asyncio
@@ -20,6 +20,7 @@ async def test_event_bus_publish_and_receive() -> None:
         order_id=1,
         status=OrderStatus.SUBMITTED,
         contract=SymbolContract(symbol="AAPL"),
+        side=OrderSide.BUY,
         filled=0,
         remaining=1,
         avg_fill_price=0.0,
@@ -43,6 +44,7 @@ async def test_multiple_subscribers_receive_same_event() -> None:
         order_id=5,
         status=OrderStatus.SUBMITTED,
         contract=SymbolContract(symbol="QQQ"),
+        side=OrderSide.BUY,
         filled=0,
         remaining=1,
         avg_fill_price=0.0,

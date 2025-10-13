@@ -228,4 +228,5 @@ async def test_order_event_published_when_event_bus_provided() -> None:
     assert event.order_id == 55
     assert event.filled == 1
     assert event.status.value == "Submitted"
+    assert event.side == OrderSide.BUY
     subscription.close()

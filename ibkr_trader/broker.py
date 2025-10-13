@@ -1,9 +1,11 @@
 """IBKR broker connection and order management."""
 
+from __future__ import annotations
+
 import asyncio
 from datetime import UTC, datetime
 from decimal import Decimal
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from ib_insync import IB, Contract, LimitOrder, MarketOrder, Order, OrderState, StopOrder
 from loguru import logger
@@ -21,6 +23,9 @@ from ibkr_trader.models import (
 )
 from ibkr_trader.safety import LiveTradingGuard
 
+if TYPE_CHECKING:
+    from ibkr_trader.portfolio import RiskGuard
+
 
 class IBKRBroker:
     """IBKR broker connection and trading interface.
@@ -34,6 +39,7 @@ class IBKRBroker:
         guard: LiveTradingGuard,
         ib_client: IB | None = None,
         event_bus: EventBus | None = None,
+        risk_guard: RiskGuard | None = None,
     ) -> None:
         """Initialize broker connection.
 
@@ -48,6 +54,7 @@ class IBKRBroker:
         self.ib = ib_client or IB()
         self._connected = False
         self._event_bus = event_bus
+        self._risk_guard = risk_guard
 
     async def connect(self, timeout: float = 10.0) -> None:
         """Connect to IBKR TWS/Gateway."""
@@ -202,6 +209,20 @@ class IBKRBroker:
             symbol=order_request.contract.symbol, quantity=order_request.quantity
         )
 
+        if self._risk_guard is not None:
+            price_for_risk = (
+                order_request.expected_price
+                or order_request.limit_price
+                or order_request.stop_price
+                or Decimal("0")
+            )
+            await self._risk_guard.validate_order(
+                contract=order_request.contract,
+                side=order_request.side,
+                quantity=order_request.quantity,
+                price=Decimal(price_for_risk),
+            )
+
         self._ensure_connected()
 
         # Log order details
@@ -269,6 +290,7 @@ class IBKRBroker:
                 order_id=result.order_id,
                 status=result_status,
                 contract=order_request.contract,
+                side=order_request.side,
                 filled=filled_quantity,
                 remaining=remaining_quantity,
                 avg_fill_price=avg_fill_price,
@@ -322,7 +344,7 @@ class IBKRBroker:
             summary[item.tag] = item.value
         return summary
 
-    def __enter__(self) -> "IBKRBroker":
+    def __enter__(self) -> IBKRBroker:
         """Context manager entry."""
         return self
 

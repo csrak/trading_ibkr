@@ -41,6 +41,9 @@ class IBKRConfig(BaseSettings):
     # Safety settings
     max_position_size: int = Field(default=100, description="Maximum position size per symbol")
     max_daily_loss: float = Field(default=1000.0, description="Maximum daily loss in USD")
+    max_order_exposure: float = Field(
+        default=10000.0, description="Maximum notional exposure per single order"
+    )
 
     # Data paths
     data_dir: Path = Field(default=Path("data"), description="Directory for storing data")

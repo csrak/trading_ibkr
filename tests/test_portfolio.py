@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from decimal import Decimal
 
 import pytest
 
+from ibkr_trader.events import OrderStatusEvent
 from ibkr_trader.models import OrderSide, OrderStatus, Position, SymbolContract
 from ibkr_trader.portfolio import PortfolioState, RiskGuard
 
@@ -55,6 +57,14 @@ async def test_risk_guard_handles_fill_event() -> None:
     state = PortfolioState(max_daily_loss=Decimal("1000"))
     guard = RiskGuard(portfolio=state, max_exposure=Decimal("5000"))
 
-    await guard.handle_order_status(
-        "AAPL", OrderStatus.FILLED, filled=5, avg_fill_price=Decimal("120")
+    event = OrderStatusEvent(
+        order_id=1,
+        status=OrderStatus.FILLED,
+        contract=SymbolContract(symbol="AAPL"),
+        side=OrderSide.BUY,
+        filled=5,
+        remaining=0,
+        avg_fill_price=120.0,
+        timestamp=datetime.now(tz=UTC),
     )
+    await guard.handle_order_status(event)

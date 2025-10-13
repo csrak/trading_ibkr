@@ -9,6 +9,7 @@ from decimal import Decimal
 
 from loguru import logger
 
+from ibkr_trader.events import OrderStatusEvent
 from ibkr_trader.models import OrderSide, OrderStatus, Position, SymbolContract
 
 
@@ -82,6 +83,14 @@ class RiskGuard:
         await self.portfolio.check_daily_loss_limit()
 
         exposure = quantity * price
+        if price <= 0:
+            logger.debug(
+                "Skipping exposure check for %s due to non-positive price %s",
+                contract.symbol,
+                price,
+            )
+            return
+
         if exposure > self.max_exposure:
             message = (
                 f"Order exposure {exposure} exceeds max exposure "
@@ -89,8 +98,13 @@ class RiskGuard:
             )
             raise RuntimeError(message)
 
-    async def handle_order_status(
-        self, symbol: str, status: OrderStatus, filled: int, avg_fill_price: Decimal
-    ) -> None:
-        if status == OrderStatus.FILLED and filled > 0:
-            await self.portfolio.record_order_fill(symbol, OrderSide.BUY, filled, avg_fill_price)
+    async def handle_order_status(self, event: OrderStatusEvent) -> None:
+        if event.status != OrderStatus.FILLED or event.filled <= 0:
+            return
+
+        await self.portfolio.record_order_fill(
+            symbol=event.contract.symbol,
+            side=event.side,
+            filled=event.filled,
+            avg_price=Decimal(str(event.avg_fill_price)),
+        )

@@ -10,7 +10,7 @@ from datetime import datetime
 from decimal import Decimal
 from enum import Enum
 
-from ibkr_trader.models import OrderStatus, SymbolContract
+from ibkr_trader.models import OrderSide, OrderStatus, SymbolContract
 
 
 class EventTopic(str, Enum):
@@ -28,6 +28,7 @@ class OrderStatusEvent:
     order_id: int
     status: OrderStatus
     contract: SymbolContract
+    side: OrderSide
     filled: int
     remaining: int
     avg_fill_price: float
