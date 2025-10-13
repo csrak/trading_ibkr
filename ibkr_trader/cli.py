@@ -18,7 +18,7 @@ from ibkr_trader.constants import (
     MOCK_PRICE_SLEEP_SECONDS,
     MOCK_PRICE_VARIATION_MODULO,
 )
-from ibkr_trader.events import EventBus, EventTopic, OrderStatusEvent
+from ibkr_trader.events import EventBus, EventTopic, ExecutionEvent, OrderStatusEvent
 from ibkr_trader.market_data import MarketDataService, SubscriptionRequest
 from ibkr_trader.models import OrderRequest, OrderSide, OrderType, SymbolContract
 from ibkr_trader.portfolio import PortfolioState, RiskGuard
@@ -204,6 +204,7 @@ async def run_strategy(
     )
     strategy: SimpleMovingAverageStrategy | None = None
     order_task: asyncio.Task[None] | None = None
+    execution_task: asyncio.Task[None] | None = None
     stream_contexts: list[AbstractAsyncContextManager[None]] = []
 
     try:
@@ -257,6 +258,18 @@ async def run_strategy(
 
         order_task = asyncio.create_task(order_status_listener())
 
+        async def execution_listener() -> None:
+            subscription = event_bus.subscribe(EventTopic.EXECUTION)
+            try:
+                async for event in subscription:
+                    if isinstance(event, ExecutionEvent):
+                        await portfolio.record_execution_event(event)
+                        await portfolio.persist()
+            except asyncio.CancelledError:
+                raise
+
+        execution_task = asyncio.create_task(execution_listener())
+
         logger.info(f"Strategy initialized: {strategy_config.name}")
         logger.info(f"Fast SMA: {fast_period}, Slow SMA: {slow_period}")
         logger.info("Starting price monitoring... (Press Ctrl+C to stop)")
@@ -287,6 +300,10 @@ async def run_strategy(
             order_task.cancel()
             with suppress(asyncio.CancelledError):
                 await order_task
+        if execution_task is not None:
+            execution_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await execution_task
         await broker.disconnect()
         logger.info("Strategy stopped")
 

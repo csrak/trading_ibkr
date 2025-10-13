@@ -7,11 +7,22 @@ from datetime import UTC, datetime
 from decimal import Decimal
 from typing import TYPE_CHECKING, Any
 
-from ib_insync import IB, Contract, LimitOrder, MarketOrder, Order, OrderState, StopOrder
+from ib_insync import (
+    IB,
+    CommissionReport,
+    Contract,
+    Fill,
+    LimitOrder,
+    MarketOrder,
+    Order,
+    OrderState,
+    StopOrder,
+    Trade,
+)
 from loguru import logger
 
 from ibkr_trader.config import IBKRConfig
-from ibkr_trader.events import EventBus, EventTopic, OrderStatusEvent
+from ibkr_trader.events import EventBus, EventTopic, ExecutionEvent, OrderStatusEvent
 from ibkr_trader.models import (
     OrderRequest,
     OrderResult,
@@ -250,6 +261,61 @@ class IBKRBroker:
 
         # Place order
         trade = self.ib.placeOrder(contract, order)
+        loop = asyncio.get_running_loop()
+
+        def _handle_fill(trade_obj: Trade, fill: Fill) -> None:  # pragma: no cover - callback
+            try:
+                exec_side = (
+                    OrderSide.BUY
+                    if fill.execution.side.upper() in {"BOT", "BUY"}
+                    else OrderSide.SELL
+                )
+                quantity = int(fill.execution.shares)
+                fill_price = Decimal(str(fill.execution.price))
+                commission_value = Decimal("0")
+                if fill.commissionReport is not None:
+                    commission_value = Decimal(str(fill.commissionReport.commission))
+
+                event = ExecutionEvent(
+                    order_id=trade_obj.order.orderId,
+                    contract=order_request.contract,
+                    side=exec_side,
+                    quantity=quantity,
+                    price=fill_price,
+                    commission=commission_value,
+                    timestamp=datetime.now(UTC),
+                )
+                loop.create_task(self._publish_execution(event))
+            except Exception as exc:
+                logger.warning("Failed to handle execution event: %s", exc)
+
+        def _handle_commission(
+            trade_obj: Trade, fill: Fill, report: CommissionReport
+        ) -> None:  # pragma: no cover - callback
+            try:
+                exec_side = (
+                    OrderSide.BUY
+                    if fill.execution.side.upper() in {"BOT", "BUY"}
+                    else OrderSide.SELL
+                )
+                quantity = int(fill.execution.shares)
+                fill_price = Decimal(str(fill.execution.price))
+                commission_value = Decimal(str(report.commission))
+                event = ExecutionEvent(
+                    order_id=trade_obj.order.orderId,
+                    contract=order_request.contract,
+                    side=exec_side,
+                    quantity=quantity,
+                    price=fill_price,
+                    commission=commission_value,
+                    timestamp=datetime.now(UTC),
+                )
+                loop.create_task(self._publish_execution(event))
+            except Exception as exc:
+                logger.warning("Failed to handle commission report: %s", exc)
+
+        trade.fillEvent += _handle_fill
+        trade.commissionReportEvent += _handle_commission
 
         status_event = getattr(trade, "statusEvent", None)
 
@@ -364,3 +430,8 @@ class IBKRBroker:
         if self._event_bus is None:
             return
         await self._event_bus.publish(EventTopic.ORDER_STATUS, event)
+
+    async def _publish_execution(self, event: ExecutionEvent) -> None:
+        if self._event_bus is None:
+            return
+        await self._event_bus.publish(EventTopic.EXECUTION, event)

@@ -38,6 +38,8 @@ def _trade_with_id(order_id: int = 1001) -> SimpleNamespace:
     trade = SimpleNamespace(
         order=SimpleNamespace(orderId=order_id),
         statusEvent=status_event,
+        fillEvent=Event("fill"),
+        commissionReportEvent=Event("commission"),
         orderStatus=SimpleNamespace(
             status="Submitted",
             filled=0,
@@ -229,4 +231,47 @@ async def test_order_event_published_when_event_bus_provided() -> None:
     assert event.filled == 1
     assert event.status.value == "Submitted"
     assert event.side == OrderSide.BUY
+    subscription.close()
+
+
+@pytest.mark.asyncio
+async def test_execution_events_emitted_on_fill() -> None:
+    config = IBKRConfig()
+    guard = LiveTradingGuard(config=config)
+    ib_mock = _make_ib_mock()
+    trade = _trade_with_id(order_id=90)
+    ib_mock.placeOrder.return_value = trade
+
+    event_bus = EventBus()
+    subscription = event_bus.subscribe(EventTopic.EXECUTION)
+
+    broker = IBKRBroker(
+        config=config,
+        guard=guard,
+        ib_client=ib_mock,
+        event_bus=event_bus,
+    )
+    await broker.connect()
+
+    order_request = OrderRequest(
+        contract=SymbolContract(symbol="AAPL"),
+        side=OrderSide.BUY,
+        quantity=1,
+        order_type=OrderType.MARKET,
+    )
+
+    await broker.place_order(order_request)
+
+    fill = SimpleNamespace(
+        execution=SimpleNamespace(side="BOT", shares=1, price=120.0),
+        commissionReport=None,
+    )
+
+    trade.fillEvent.emit(trade, fill)
+
+    event = await asyncio.wait_for(subscription.get(), timeout=0.1)
+    assert event.order_id == 90
+    assert event.quantity == 1
+    assert event.side == OrderSide.BUY
+    assert event.price == Decimal("120.0")
     subscription.close()

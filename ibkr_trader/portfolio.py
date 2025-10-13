@@ -12,7 +12,7 @@ from typing import Any
 
 from loguru import logger
 
-from ibkr_trader.events import OrderStatusEvent
+from ibkr_trader.events import ExecutionEvent, OrderStatusEvent
 from ibkr_trader.models import OrderSide, OrderStatus, Position, SymbolContract
 
 
@@ -159,3 +159,6 @@ class RiskGuard:
             filled=event.filled,
             avg_price=Decimal(str(event.avg_fill_price)),
         )
+
+    async def record_execution_event(self, event: ExecutionEvent) -> None:
+        await self.record_order_fill(event.contract.symbol, event.side, event.quantity, event.price)

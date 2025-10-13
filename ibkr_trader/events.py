@@ -19,6 +19,7 @@ class EventTopic(str, Enum):
     ORDER_STATUS = "order_status"
     MARKET_DATA = "market_data"
     ACCOUNT = "account"
+    EXECUTION = "execution"
 
 
 @dataclass(frozen=True, slots=True)
@@ -41,6 +42,19 @@ class MarketDataEvent:
 
     symbol: str
     price: Decimal
+    timestamp: datetime
+
+
+@dataclass(frozen=True, slots=True)
+class ExecutionEvent:
+    """Payload representing an execution fill."""
+
+    order_id: int
+    contract: SymbolContract
+    side: OrderSide
+    quantity: int
+    price: Decimal
+    commission: Decimal
     timestamp: datetime
 
 
