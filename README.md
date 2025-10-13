@@ -27,7 +27,7 @@ Clean, modular design following best practices:
 - **Market Data**: Service layer for throttled subscriptions and external price feeds
 - **Portfolio**: In-memory portfolio/risk tracking with daily loss and exposure guardrails,
   persisted to `data/portfolio_snapshot.json` by default for resilience
-- **Sim**: Drop-in simulated broker/market data components for backtesting (see `ibkr_trader/sim`)
+- **Sim/Backtest**: Drop-in simulated broker/market data components and reusable engine for backtests (`ibkr_trader/sim`, `ibkr_trader/backtest`)
 - **Strategy**: Event-driven strategies that subscribe to bus updates and submit orders through a shared context
 - **CLI**: Typer-based command-line interface
 
@@ -79,7 +79,7 @@ IBKR_HOST=127.0.0.1
 IBKR_MAX_POSITION_SIZE=100
 IBKR_MAX_DAILY_LOSS=1000.0
 IBKR_MAX_ORDER_EXPOSURE=10000.0
-IBKR_USE_MOCK_MARKET_DATA=true
+IBKR_USE_MOCK_MARKET_DATA=true  # Set to false to stream real market data (requires entitlements)
 ```
 
 ## 🚀 Quick Start
@@ -101,6 +101,9 @@ ibkr-trader paper-quick spy --side SELL
 
 # Submit a 1-share paper trade market order
 ibkr-trader paper-order --symbol AAPL --quantity 1
+
+# Run a backtest over a CSV of historical data
+ibkr-trader backtest data/AAPL_1d.csv --symbol AAPL --timestamp date --price close
 ```
 
 ### Run Strategy (Paper Trading)
