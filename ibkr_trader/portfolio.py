@@ -65,6 +65,14 @@ class PortfolioState:
             avg_price,
         )
 
+    async def record_execution_event(self, event: ExecutionEvent) -> None:
+        await self.record_order_fill(
+            symbol=event.contract.symbol,
+            side=event.side,
+            filled=event.quantity,
+            avg_price=event.price,
+        )
+
     async def check_daily_loss_limit(self) -> None:
         async with self._lock:
             today = datetime.now(UTC).date()
@@ -159,6 +167,3 @@ class RiskGuard:
             filled=event.filled,
             avg_price=Decimal(str(event.avg_fill_price)),
         )
-
-    async def record_execution_event(self, event: ExecutionEvent) -> None:
-        await self.record_order_fill(event.contract.symbol, event.side, event.quantity, event.price)

@@ -2,6 +2,7 @@
 
 __version__ = "0.1.0"
 
+from ibkr_trader.backtest.engine import BacktestEngine
 from ibkr_trader.broker import IBKRBroker
 from ibkr_trader.config import IBKRConfig, TradingMode, load_config
 from ibkr_trader.constants import (
@@ -23,9 +24,11 @@ from ibkr_trader.models import (
 )
 from ibkr_trader.portfolio import PortfolioState, RiskGuard
 from ibkr_trader.safety import LiveTradingError, LiveTradingGuard
+from ibkr_trader.sim.broker import SimulatedBroker, SimulatedMarketData
 from ibkr_trader.strategy import SimpleMovingAverageStrategy, SMAConfig, Strategy
 
 __all__ = [
+    "BacktestEngine",
     "IBKRBroker",
     "IBKRConfig",
     "TradingMode",
@@ -50,4 +53,6 @@ __all__ = [
     "Strategy",
     "SimpleMovingAverageStrategy",
     "SMAConfig",
+    "SimulatedBroker",
+    "SimulatedMarketData",
 ]

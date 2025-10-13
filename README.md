@@ -27,6 +27,7 @@ Clean, modular design following best practices:
 - **Market Data**: Service layer for throttled subscriptions and external price feeds
 - **Portfolio**: In-memory portfolio/risk tracking with daily loss and exposure guardrails,
   persisted to `data/portfolio_snapshot.json` by default for resilience
+- **Sim**: Drop-in simulated broker/market data components for backtesting (see `ibkr_trader/sim`)
 - **Strategy**: Event-driven strategies that subscribe to bus updates and submit orders through a shared context
 - **CLI**: Typer-based command-line interface
 

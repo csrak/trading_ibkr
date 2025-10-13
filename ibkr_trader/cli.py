@@ -6,9 +6,11 @@ from contextlib import AbstractAsyncContextManager, suppress
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
+import pandas as pd
 import typer
 from loguru import logger
 
+from ibkr_trader.backtest.engine import BacktestEngine
 from ibkr_trader.broker import IBKRBroker
 from ibkr_trader.config import TradingMode, load_config
 from ibkr_trader.constants import (
@@ -24,6 +26,7 @@ from ibkr_trader.models import OrderRequest, OrderSide, OrderType, SymbolContrac
 from ibkr_trader.portfolio import PortfolioState, RiskGuard
 from ibkr_trader.presets import get_preset, preset_names
 from ibkr_trader.safety import LiveTradingGuard
+from ibkr_trader.sim.broker import SimulatedBroker, SimulatedMarketData
 from ibkr_trader.strategy import SimpleMovingAverageStrategy, SMAConfig
 
 app = typer.Typer(
@@ -610,6 +613,85 @@ def paper_quick(
     except Exception as exc:  # pragma: no cover - surface detailed CLI error
         logger.error(f"Failed to submit preset order: {exc}")
         raise typer.Exit(code=1) from exc
+
+
+@app.command()
+def backtest(
+    data_path: Path = typer.Argument(..., exists=True, readable=True, resolve_path=True),
+    symbol: str = typer.Option("AAPL", "--symbol", help="Symbol represented in the dataset"),
+    timestamp_column: str = typer.Option("timestamp", help="Column containing ISO timestamps"),
+    price_column: str = typer.Option("close", help="Column containing price data"),
+    fast_period: int = typer.Option(10, "--fast", help="Fast SMA period"),
+    slow_period: int = typer.Option(20, "--slow", help="Slow SMA period"),
+    position_size: int = typer.Option(10, "--size", help="Position size per trade"),
+    verbose: bool = typer.Option(False, "--verbose", help="Enable verbose logging"),
+) -> None:
+    """Run a backtest using historical price data from CSV."""
+    config = load_config()
+    setup_logging(config.log_dir, verbose)
+
+    try:
+        frame = pd.read_csv(data_path)
+    except Exception as exc:  # pragma: no cover - IO error surfaces to user
+        logger.error(f"Failed to load data: {exc}")
+        raise typer.Exit(code=1) from exc
+
+    if timestamp_column not in frame.columns or price_column not in frame.columns:
+        logger.error(
+            "Backtest dataset must contain '%s' and '%s' columns",
+            timestamp_column,
+            price_column,
+        )
+        raise typer.Exit(code=1)
+
+    frame = frame[[timestamp_column, price_column]].dropna()
+    if frame.empty:
+        logger.error("Backtest dataset is empty after filtering")
+        raise typer.Exit(code=1)
+
+    frame[timestamp_column] = pd.to_datetime(frame[timestamp_column], utc=True, errors="raise")
+    frame = frame.sort_values(timestamp_column)
+
+    bars = [
+        (row[timestamp_column].to_pydatetime(), Decimal(str(row[price_column])))
+        for row in frame.itertuples(index=False)
+    ]
+
+    event_bus = EventBus()
+    market_data = SimulatedMarketData(event_bus)
+    snapshot_path = config.data_dir / DEFAULT_PORTFOLIO_SNAPSHOT.name
+    portfolio = PortfolioState(Decimal(str(config.max_daily_loss)), snapshot_path=snapshot_path)
+    risk_guard = RiskGuard(
+        portfolio=portfolio,
+        max_exposure=Decimal(str(config.max_order_exposure)),
+    )
+    broker = SimulatedBroker(event_bus=event_bus, risk_guard=risk_guard)
+
+    strategy_config = SMAConfig(
+        symbols=[symbol],
+        fast_period=fast_period,
+        slow_period=slow_period,
+        position_size=position_size,
+    )
+    strategy = SimpleMovingAverageStrategy(
+        config=strategy_config,
+        broker=broker,
+        event_bus=event_bus,
+        risk_guard=risk_guard,
+    )
+
+    engine = BacktestEngine(
+        symbol=symbol,
+        event_bus=event_bus,
+        market_data=market_data,
+        broker=broker,
+        portfolio=portfolio,
+        risk_guard=risk_guard,
+    )
+
+    asyncio.run(engine.run(strategy, bars))
+
+    logger.info("Backtest completed with %s executions", len(broker.execution_events))
 
 
 if __name__ == "__main__":

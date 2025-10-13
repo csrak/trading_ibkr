@@ -161,14 +161,20 @@ class SimpleMovingAverageStrategy(Strategy):
     This is a simple test strategy for demonstration purposes.
     """
 
-    def __init__(self, config: SMAConfig, broker: IBKRBroker, event_bus: EventBus) -> None:
+    def __init__(
+        self,
+        config: SMAConfig,
+        broker: IBKRBroker,
+        event_bus: EventBus,
+        risk_guard: RiskGuard | None = None,
+    ) -> None:
         """Initialize SMA strategy.
 
         Args:
             config: SMA strategy configuration
             broker: Broker interface
         """
-        super().__init__(config, broker, event_bus)
+        super().__init__(config, broker, event_bus, risk_guard=risk_guard)
         self.config: SMAConfig = config  # Type narrowing
 
         # Price history for each symbol
