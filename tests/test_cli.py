@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
 from types import SimpleNamespace
 
 import pytest
@@ -62,6 +63,24 @@ class DummyBroker:
         )
 
 
+class DummyMarketDataService:
+    def __init__(self, event_bus: object) -> None:
+        self.event_bus = event_bus
+
+    async def publish_price(self, symbol: str, price: object) -> None:
+        return None
+
+    def attach_ib(self, ib: object) -> None:  # pragma: no cover - tests mock IB usage
+        return None
+
+    def subscribe(self, *args: object, **kwargs: object) -> object:
+        @asynccontextmanager
+        async def _context() -> None:
+            yield
+
+        return _context()
+
+
 def test_paper_order_cli_submits_market_order(monkeypatch: pytest.MonkeyPatch) -> None:
     config = IBKRConfig(trading_mode=TradingMode.PAPER)
 
@@ -73,7 +92,9 @@ def test_paper_order_cli_submits_market_order(monkeypatch: pytest.MonkeyPatch) -
         "IBKRBroker",
         lambda config, guard, event_bus=None, risk_guard=None: dummy_broker,
     )
-    monkeypatch.setattr(cli, "MarketDataService", lambda event_bus: None)
+    monkeypatch.setattr(
+        cli, "MarketDataService", lambda event_bus: DummyMarketDataService(event_bus)
+    )
 
     result = runner.invoke(
         cli.app,
@@ -129,7 +150,9 @@ def test_paper_order_allows_custom_contract(monkeypatch: pytest.MonkeyPatch) -> 
         "IBKRBroker",
         lambda config, guard, event_bus=None, risk_guard=None: dummy_broker,
     )
-    monkeypatch.setattr(cli, "MarketDataService", lambda event_bus: None)
+    monkeypatch.setattr(
+        cli, "MarketDataService", lambda event_bus: DummyMarketDataService(event_bus)
+    )
 
     result = runner.invoke(
         cli.app,
@@ -177,7 +200,9 @@ def test_paper_order_preview(monkeypatch: pytest.MonkeyPatch) -> None:
         "IBKRBroker",
         lambda config, guard, event_bus=None, risk_guard=None: dummy_broker,
     )
-    monkeypatch.setattr(cli, "MarketDataService", lambda event_bus: None)
+    monkeypatch.setattr(
+        cli, "MarketDataService", lambda event_bus: DummyMarketDataService(event_bus)
+    )
 
     result = runner.invoke(
         cli.app,
@@ -208,7 +233,9 @@ def test_paper_quick_uses_preset_defaults(monkeypatch: pytest.MonkeyPatch) -> No
         "IBKRBroker",
         lambda config, guard, event_bus=None, risk_guard=None: dummy_broker,
     )
-    monkeypatch.setattr(cli, "MarketDataService", lambda event_bus: None)
+    monkeypatch.setattr(
+        cli, "MarketDataService", lambda event_bus: DummyMarketDataService(event_bus)
+    )
 
     result = runner.invoke(
         cli.app,

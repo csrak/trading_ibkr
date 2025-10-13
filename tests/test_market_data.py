@@ -4,12 +4,41 @@ from __future__ import annotations
 
 import asyncio
 from decimal import Decimal
+from types import SimpleNamespace
 
 import pytest
+from eventkit import Event
+from ib_insync import Contract
 
 from ibkr_trader.events import EventBus, EventTopic, MarketDataEvent
 from ibkr_trader.market_data import MarketDataService, SubscriptionRequest
 from ibkr_trader.models import SymbolContract
+
+
+class DummyIB:
+    def __init__(self) -> None:
+        self._ticker = SimpleNamespace()
+        self._ticker.contract = Contract()
+        self._ticker.updateEvent = Event()
+        self._ticker.last = None
+        self._ticker.close = None
+        self._ticker.marketPrice = lambda: None
+        self._ticker.midpoint = lambda: None
+
+    async def qualifyContractsAsync(  # noqa: N802
+        self, contract: Contract
+    ) -> list[Contract]:
+        self._ticker.contract = contract
+        return [contract]
+
+    def reqMktData(  # noqa: N802
+        self, contract: Contract, *_args: object
+    ) -> SimpleNamespace:
+        self._ticker.contract = contract
+        return self._ticker
+
+    def cancelMktData(self, contract: Contract) -> None:  # noqa: N802
+        return None
 
 
 @pytest.mark.asyncio
@@ -33,6 +62,7 @@ async def test_subscription_context_tracks_counts() -> None:
     service = MarketDataService(event_bus=bus)
     contract = SymbolContract(symbol="AAPL")
     request = SubscriptionRequest(contract=contract)
+    service.attach_ib(DummyIB())
 
     async with service.subscribe(request):
         # inside the context, a publish still works

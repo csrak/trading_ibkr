@@ -44,6 +44,10 @@ class IBKRConfig(BaseSettings):
     max_order_exposure: float = Field(
         default=10000.0, description="Maximum notional exposure per single order"
     )
+    use_mock_market_data: bool = Field(
+        default=True,
+        description="Generate mock market data instead of streaming from IBKR",
+    )
 
     # Data paths
     data_dir: Path = Field(default=Path("data"), description="Directory for storing data")

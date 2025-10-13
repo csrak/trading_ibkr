@@ -2,7 +2,7 @@
 
 import asyncio
 import sys
-from contextlib import suppress
+from contextlib import AbstractAsyncContextManager, suppress
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
@@ -13,12 +13,13 @@ from ibkr_trader.broker import IBKRBroker
 from ibkr_trader.config import TradingMode, load_config
 from ibkr_trader.constants import (
     DEFAULT_PORTFOLIO_SNAPSHOT,
+    MARKET_DATA_IDLE_SLEEP_SECONDS,
     MOCK_PRICE_BASE,
     MOCK_PRICE_SLEEP_SECONDS,
     MOCK_PRICE_VARIATION_MODULO,
 )
 from ibkr_trader.events import EventBus, EventTopic, OrderStatusEvent
-from ibkr_trader.market_data import MarketDataService
+from ibkr_trader.market_data import MarketDataService, SubscriptionRequest
 from ibkr_trader.models import OrderRequest, OrderSide, OrderType, SymbolContract
 from ibkr_trader.portfolio import PortfolioState, RiskGuard
 from ibkr_trader.presets import get_preset, preset_names
@@ -203,6 +204,7 @@ async def run_strategy(
     )
     strategy: SimpleMovingAverageStrategy | None = None
     order_task: asyncio.Task[None] | None = None
+    stream_contexts: list[AbstractAsyncContextManager[None]] = []
 
     try:
         # Connect to IBKR
@@ -218,6 +220,14 @@ async def run_strategy(
         positions = await broker.get_positions()
         await portfolio.update_positions(positions)
         await portfolio.persist()
+
+        if not config.use_mock_market_data:
+            market_data.attach_ib(broker.ib)
+            for symbol in symbols:
+                request = SubscriptionRequest(SymbolContract(symbol=symbol))
+                context = market_data.subscribe(request)
+                await context.__aenter__()
+                stream_contexts.append(context)
 
         # Initialize strategy
         strategy_config = SMAConfig(
@@ -251,22 +261,19 @@ async def run_strategy(
         logger.info(f"Fast SMA: {fast_period}, Slow SMA: {slow_period}")
         logger.info("Starting price monitoring... (Press Ctrl+C to stop)")
 
-        # Simple price monitoring loop (in production, use real-time data)
-        # This is a placeholder - you'd integrate with actual market data feed
-        counter = 0
-        while True:
-            counter += 1
+        if config.use_mock_market_data:
+            counter = 0
+            while True:
+                counter += 1
 
-            # Simulate receiving price data
-            # In production, replace with actual market data subscription
-            for symbol in symbols:
-                # Placeholder: Generate mock price movements for testing
-                # In production: get real price from broker.ib.reqMktData()
-                mock_price = MOCK_PRICE_BASE + Decimal(counter % MOCK_PRICE_VARIATION_MODULO)
-                await market_data.publish_price(symbol, mock_price)
+                for symbol in symbols:
+                    mock_price = MOCK_PRICE_BASE + Decimal(counter % MOCK_PRICE_VARIATION_MODULO)
+                    await market_data.publish_price(symbol, mock_price)
 
-            # Wait before next update
-            await asyncio.sleep(MOCK_PRICE_SLEEP_SECONDS)  # Check periodically
+                await asyncio.sleep(MOCK_PRICE_SLEEP_SECONDS)
+        else:
+            while True:
+                await asyncio.sleep(MARKET_DATA_IDLE_SLEEP_SECONDS)
 
     except KeyboardInterrupt:
         logger.info("Shutting down gracefully...")
