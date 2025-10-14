@@ -8,7 +8,15 @@ from typing import ClassVar, Literal
 
 from pydantic import BaseModel, Field, ValidationError
 
-type StrategyType = Literal["fixed_spread_mm", "vol_overlay"]
+type StrategyType = Literal[
+    "fixed_spread_mm",
+    "vol_overlay",
+    "mean_reversion",
+    "skew_arb",
+    "microstructure_ml",
+    "regime_rotation",
+    "vol_spillover",
+]
 
 
 class DataConfig(BaseModel):
@@ -89,8 +97,76 @@ class VolatilityOverlayConfig(StrategyConfig):
     execution: VolOverlayExecutionConfig = Field(default_factory=VolOverlayExecutionConfig)
 
 
+class MeanReversionExecutionConfig(ExecutionConfig):
+    lookback_short: int = 20
+    lookback_long: int = 60
+    entry_zscore: float = 2.0
+    exit_zscore: float = 0.5
+    volatility_window: int = 30
+    stop_multiple: float = 2.0
+
+
+class MeanReversionConfig(StrategyConfig):
+    strategy_type: Literal["mean_reversion"] = "mean_reversion"
+    execution: MeanReversionExecutionConfig = Field(default_factory=MeanReversionExecutionConfig)
+
+
+class SkewArbExecutionConfig(ExecutionConfig):
+    expiries: list[str] = Field(default_factory=list)
+    strikes_per_expiry: int = 3
+    skew_threshold: float = 0.15
+    max_notional: float = 1000.0
+    min_open_interest: int = 100
+
+
+class SkewArbitrageConfig(StrategyConfig):
+    strategy_type: Literal["skew_arb"] = "skew_arb"
+    execution: SkewArbExecutionConfig = Field(default_factory=SkewArbExecutionConfig)
+
+
+class MicrostructureExecutionConfig(ExecutionConfig):
+    model_path: Path | None = None
+    feature_set: list[str] = Field(default_factory=list)
+    prediction_horizon_ms: int = 1000
+    confidence_threshold: float = 0.6
+
+
+class MicrostructureMLConfig(StrategyConfig):
+    strategy_type: Literal["microstructure_ml"] = "microstructure_ml"
+    execution: MicrostructureExecutionConfig = Field(default_factory=MicrostructureExecutionConfig)
+
+
+class RegimeRotationExecutionConfig(ExecutionConfig):
+    regime_feature: str = "volatility"
+    regime_window: int = 60
+    rebalance_frequency: str = "weekly"
+    target_allocations: dict[str, dict[str, float]] = Field(default_factory=dict)
+
+
+class RegimeRotationConfig(StrategyConfig):
+    strategy_type: Literal["regime_rotation"] = "regime_rotation"
+    execution: RegimeRotationExecutionConfig = Field(default_factory=RegimeRotationExecutionConfig)
+
+
+class VolSpilloverExecutionConfig(ExecutionConfig):
+    asset_pairs: list[list[str]] = Field(default_factory=list)
+    spillover_threshold: float = 0.2
+    hedge_ratio: float = 1.0
+    correlation_window: int = 60
+
+
+class VolSpilloverConfig(StrategyConfig):
+    strategy_type: Literal["vol_spillover"] = "vol_spillover"
+    execution: VolSpilloverExecutionConfig = Field(default_factory=VolSpilloverExecutionConfig)
+
+
 StrategyConfig.register(FixedSpreadMMConfig)
 StrategyConfig.register(VolatilityOverlayConfig)
+StrategyConfig.register(MeanReversionConfig)
+StrategyConfig.register(SkewArbitrageConfig)
+StrategyConfig.register(MicrostructureMLConfig)
+StrategyConfig.register(RegimeRotationConfig)
+StrategyConfig.register(VolSpilloverConfig)
 
 
 def load_strategy_config(path: Path) -> StrategyConfig:

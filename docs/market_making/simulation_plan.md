@@ -164,3 +164,61 @@ uv run python -m ibkr_trader.scripts.replay_mm \
 ```
 
 The script launches the `FixedSpreadMMStrategy`, replays the provided order-book data, and logs fill counts, filled quantity, and ending inventory.
+
+#### JSON Config Templates
+
+All strategies can be described via JSON (or YAML) configs using the Pydantic models under `ibkr_trader.strategy_configs`. A few examples:
+
+```jsonc
+// fixed_spread_mm.json
+{
+  "name": "sample-mm",
+  "strategy_type": "fixed_spread_mm",
+  "symbol": "AAPL",
+  "data": {
+    "order_book": ["data/order_book/AAPL/20240102.csv"]
+  },
+  "execution": {
+    "spread": 0.15,
+    "quote_size": 2
+  },
+  "risk": {
+    "inventory_limit": 4
+  }
+}
+
+// mean_reversion.json
+{
+  "strategy_type": "mean_reversion",
+  "symbol": "AAPL",
+  "execution": {
+    "lookback_short": 20,
+    "lookback_long": 80,
+    "entry_zscore": 1.8,
+    "exit_zscore": 0.4,
+    "stop_multiple": 2.5
+  }
+}
+
+// microstructure_ml.json
+{
+  "strategy_type": "microstructure_ml",
+  "symbol": "AAPL",
+  "data": {
+    "order_book": ["data/l2/aapl_20240102.csv"],
+    "trades": ["data/trades/aapl_20240102.csv"]
+  },
+  "execution": {
+    "model_path": "models/microstructure.onnx",
+    "feature_set": ["order_imbalance", "trade_momentum"],
+    "prediction_horizon_ms": 750,
+    "confidence_threshold": 0.65
+  }
+}
+```
+
+Use the replay CLI with a config:
+
+```bash
+uv run python -m ibkr_trader.scripts.replay_mm --config configs/fixed_spread_mm.json
+```
