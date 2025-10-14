@@ -3,15 +3,25 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Iterable
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
 import pytest
 
+from model.data.client import MarketDataClient
+from model.data.market_data import MarketDataSource, PriceBarRequest
 from model.inference.price_predictor import LinearIndustryArtifact, predict_price
 from model.training import industry_model
+
+
+class StubMarketDataSource(MarketDataSource):
+    def __init__(self, frames: dict[str, pd.DataFrame]) -> None:
+        self.frames = frames
+
+    def get_price_bars(self, request: PriceBarRequest) -> pd.DataFrame:
+        frame = self.frames[request.symbol]
+        return frame.copy()
 
 
 @pytest.fixture
@@ -28,13 +38,12 @@ def sample_prices() -> pd.DataFrame:
 
 
 @pytest.fixture
-def trained_artifact_path(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, sample_prices: pd.DataFrame
-) -> Path:
-    def fake_download(symbols: Iterable[str], start: str, end: str) -> pd.DataFrame:
-        return sample_prices.loc[:, list(symbols)].copy()
-
-    monkeypatch.setattr(industry_model, "_download_prices", fake_download)
+def trained_artifact_path(tmp_path: Path, sample_prices: pd.DataFrame) -> Path:
+    frames = {
+        symbol: pd.DataFrame({"adj_close": sample_prices[symbol]})
+        for symbol in ["AAPL", "MSFT", "GOOGL"]
+    }
+    data_client = MarketDataClient(source=StubMarketDataSource(frames))
 
     return industry_model.train_linear_industry_model(
         target_symbol="AAPL",
@@ -43,6 +52,7 @@ def trained_artifact_path(
         end="2024-02-01",
         horizon_days=2,
         artifact_dir=tmp_path,
+        data_client=data_client,
     )
 
 

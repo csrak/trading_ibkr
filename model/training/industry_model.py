@@ -40,6 +40,9 @@ import numpy as np
 import pandas as pd
 import yfinance as yf
 
+from model.data.client import MarketDataClient
+from model.data.market_data import PriceBarRequest
+
 
 @dataclass(slots=True)
 class LinearIndustryModel:
@@ -69,13 +72,41 @@ class LinearIndustryModel:
         }
 
 
-def _download_prices(symbols: Iterable[str], start: str, end: str) -> pd.DataFrame:
-    data = yf.download(list(symbols), start=start, end=end, auto_adjust=False, progress=False)
+def _download_prices(
+    symbols: Iterable[str],
+    start: str,
+    end: str,
+    data_client: MarketDataClient | None = None,
+) -> pd.DataFrame:
+    if data_client is None:
+        data = yf.download(list(symbols), start=start, end=end, auto_adjust=False, progress=False)
+    else:
+        frames: list[pd.Series] = []
+        start_dt = datetime.fromisoformat(start).replace(tzinfo=UTC)
+        end_dt = datetime.fromisoformat(end).replace(tzinfo=UTC)
+        for symbol in symbols:
+            request = PriceBarRequest(
+                symbol=symbol,
+                start=start_dt,
+                end=end_dt,
+                interval="1d",
+                auto_adjust=False,
+            )
+            frame = data_client.get_price_bars(request)
+            candidate_col = next((name for name in ("adj_close", "close") if name in frame.columns), None)
+            if candidate_col is None:
+                available = frame.columns.tolist()
+                raise KeyError(f"Expected 'adj_close' or 'close' columns; got {available}")
+            series = frame[candidate_col].rename(symbol)
+            frames.append(series)
+        data = pd.concat(frames, axis=1)
 
     if data.empty:
         raise ValueError("No price data returned from yfinance. Check symbols or date range.")
 
-    if isinstance(data.columns, pd.MultiIndex):
+    if data_client is not None:
+        standardized = data
+    elif isinstance(data.columns, pd.MultiIndex):
         price_level = None
         level_index = None
         for candidate in ("Adj Close", "Close"):
@@ -91,6 +122,7 @@ def _download_prices(symbols: Iterable[str], start: str, end: str) -> pd.DataFra
             raise KeyError(f"Expected 'Adj Close' or 'Close' columns, got levels: {available}")
         data = data.xs(price_level, level=level_index, axis=1)
         data.columns = [col.upper() for col in data.columns]
+        standardized = data
     else:
         if "Adj Close" in data.columns:
             data = data[["Adj Close"]]
@@ -102,12 +134,13 @@ def _download_prices(symbols: Iterable[str], start: str, end: str) -> pd.DataFra
             data.columns = [symbols[0]]
         else:
             raise ValueError("Single-column dataset returned for multiple symbols")
+        standardized = data
 
-    data = data.dropna(how="all")
-    missing = [symbol for symbol in symbols if symbol not in data.columns]
+    standardized = standardized.dropna(how="all")
+    missing = [symbol for symbol in symbols if symbol not in standardized.columns]
     if missing:
         raise ValueError(f"Missing price columns for symbols: {missing}")
-    return data[symbols]
+    return standardized[symbols]
 
 
 def _prepare_features(
@@ -199,6 +232,7 @@ def train_linear_industry_model(
     end: str,
     horizon_days: int,
     artifact_dir: str | Path,
+    data_client: MarketDataClient | None = None,
 ) -> Path:
     """Train the example model and persist artifacts.
 
@@ -209,6 +243,8 @@ def train_linear_industry_model(
         end: End date for historical window.
         horizon_days: Forecast horizon in trading days.
         artifact_dir: Directory where model/json/predictions are saved.
+        data_client: Optional market data client used to retrieve prices. Falls back to direct
+            yfinance downloads when omitted.
 
     Returns:
         Path to the persisted model artifact JSON.
@@ -219,7 +255,7 @@ def train_linear_industry_model(
         raise ValueError("peer_symbols should not contain the target symbol")
 
     symbols = [target_symbol] + peers
-    prices = _download_prices(symbols, start=start, end=end)
+    prices = _download_prices(symbols, start=start, end=end, data_client=data_client)
     if prices.empty:
         raise ValueError("Downloaded price data is empty. Check symbols/start/end range.")
 
