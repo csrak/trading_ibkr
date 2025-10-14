@@ -123,6 +123,11 @@ ibkr-trader run --symbol AAPL --size 50
 ibkr-trader run --symbol AAPL -v
 ```
 
+## 📘 Documentation
+
+- [Quick Start Guide](QUICKSTART.md) — installation and first trades.
+- [Model Training & Data Caching Guide](docs/model_training_guide.md) — step-by-step walkthrough for preparing data, caching option chains, and training the sample model.
+
 ## ⚠️ Live Trading (Use with Extreme Caution)
 
 Live trading requires **three explicit steps**:

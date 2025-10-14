@@ -6,12 +6,14 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from types import SimpleNamespace
 
+import pandas as pd
 import pytest
 from typer.testing import CliRunner
 
 from ibkr_trader import cli
 from ibkr_trader.config import IBKRConfig, TradingMode
 from ibkr_trader.models import OrderRequest, OrderResult, OrderStatus
+from model.data.options import OptionChain
 
 runner = CliRunner()
 
@@ -430,6 +432,77 @@ def test_train_model_cli_rejects_unknown_source(
 
     assert result.exit_code != 0
     assert "Unsupported data source" in result.stdout or result.stderr
+
+
+def test_cache_option_chain_cli_invokes_client(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    config = IBKRConfig(trading_mode=TradingMode.PAPER)
+    monkeypatch.setattr(cli, "load_config", lambda: config)
+    monkeypatch.setattr(cli, "setup_logging", lambda *_args, **_kwargs: None)
+
+    captured_create: dict[str, object] = {}
+
+    class DummyOptionClient:
+        def __init__(self) -> None:
+            self.requests: list[object] = []
+
+        def get_option_chain(self, request: object) -> OptionChain:
+            self.requests.append(request)
+            calls = pd.DataFrame({"strike": [100.0], "right": ["C"], "bid": [1.0], "ask": [1.2]})
+            puts = pd.DataFrame({"strike": [100.0], "right": ["P"], "bid": [0.9], "ask": [1.1]})
+            return OptionChain(calls=calls, puts=puts)
+
+    source_closed = {"value": False}
+
+    class DummySource:
+        def close(self) -> None:
+            source_closed["value"] = True
+
+    def fake_create_option_chain_client(
+        source_name: str,
+        cache_dir_param: Path,
+        config_param: IBKRConfig,
+        *,
+        max_snapshots: int,
+        snapshot_interval: float,
+        client_id: int,
+    ) -> tuple[DummyOptionClient, DummySource]:
+        captured_create.update(
+            {
+                "source_name": source_name,
+                "cache_dir": cache_dir_param,
+                "max_snapshots": max_snapshots,
+                "snapshot_interval": snapshot_interval,
+                "client_id": client_id,
+            }
+        )
+        return DummyOptionClient(), DummySource()
+
+    monkeypatch.setattr(cli, "create_option_chain_client", fake_create_option_chain_client)
+
+    result = runner.invoke(
+        cli.app,
+        [
+            "cache-option-chain",
+            "--symbol",
+            "AAPL",
+            "--expiry",
+            "2024-01-19",
+            "--data-source",
+            "yfinance",
+            "--cache-dir",
+            str(tmp_path / "option-cache"),
+        ],
+    )
+
+    assert result.exit_code == 0, result.stdout
+    assert captured_create["source_name"] == "yfinance"
+    assert captured_create["cache_dir"] == (tmp_path / "option-cache")
+    assert captured_create["max_snapshots"] == config.training_max_snapshots
+    assert captured_create["snapshot_interval"] == config.training_snapshot_interval
+    assert captured_create["client_id"] == config.training_client_id
+    assert source_closed["value"] is True
 
 
 def test_paper_quick_lists_presets() -> None:

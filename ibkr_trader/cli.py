@@ -37,9 +37,14 @@ from ibkr_trader.strategy import (
 from model.data import (
     FileCacheStore,
     IBKRMarketDataSource,
+    IBKROptionChainSource,
     MarketDataClient,
+    OptionChainCacheStore,
+    OptionChainClient,
+    OptionChainRequest,
     SnapshotLimitError,
     YFinanceMarketDataSource,
+    YFinanceOptionChainSource,
 )
 from model.training.industry_model import train_linear_industry_model
 
@@ -111,6 +116,41 @@ def create_market_data_client(
         )
 
     client = MarketDataClient(source=source, cache=cache)
+    return client, source
+
+
+def create_option_chain_client(
+    source_name: str,
+    cache_dir: Path,
+    config: "IBKRConfig",  # noqa: F821
+    *,
+    max_snapshots: int,
+    snapshot_interval: float,
+    client_id: int,
+) -> tuple[OptionChainClient, object]:
+    """Instantiate an option chain client for caching workflows."""
+
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    cache = OptionChainCacheStore(cache_dir)
+    normalized = source_name.strip().lower()
+
+    if normalized == "yfinance":
+        source = YFinanceOptionChainSource()
+    elif normalized == "ibkr":
+        source = IBKROptionChainSource(
+            host=config.host,
+            port=config.port,
+            client_id=client_id,
+            max_snapshots_per_session=max_snapshots,
+            min_request_interval_seconds=snapshot_interval,
+        )
+    else:
+        raise typer.BadParameter(
+            "Unsupported data source. Choose 'yfinance' or 'ibkr'.",
+            param_hint="--data-source",
+        )
+
+    client = OptionChainClient(source=source, cache=cache)
     return client, source
 
 
@@ -918,6 +958,106 @@ def train_model_command(
         logger.info("Predictions saved to %s", predictions_path)
     else:  # pragma: no cover - defensive logging
         logger.warning("Prediction CSV not found at expected path: %s", predictions_path)
+
+
+@app.command("cache-option-chain")
+def cache_option_chain_command(
+    symbol: str = typer.Option(..., "--symbol", help="Underlying symbol (e.g. AAPL)"),
+    expiry: datetime = typer.Option(
+        ...,
+        "--expiry",
+        formats=["%Y-%m-%d"],
+        help="Option expiry date (YYYY-MM-DD)",
+    ),
+    data_source: str | None = typer.Option(
+        None,
+        "--data-source",
+        help=(
+            "Option data source identifier (yfinance|ibkr). "
+            "Defaults to config.training_data_source."
+        ),
+    ),
+    cache_dir: Path | None = typer.Option(
+        None,
+        "--cache-dir",
+        resolve_path=True,
+        help=(
+            "Cache directory for option chains. "
+            "Defaults to config.training_cache_dir/option_chains."
+        ),
+    ),
+    max_snapshots: int | None = typer.Option(
+        None,
+        "--max-snapshots",
+        help=(
+            "Maximum IBKR option data requests per session. "
+            "Defaults to config.training_max_snapshots."
+        ),
+    ),
+    snapshot_interval: float | None = typer.Option(
+        None,
+        "--snapshot-interval",
+        help=(
+            "Minimum seconds between IBKR option requests. "
+            "Defaults to config.training_snapshot_interval."
+        ),
+    ),
+    ibkr_client_id: int | None = typer.Option(
+        None,
+        "--ibkr-client-id",
+        help=("Client ID to use for IBKR option requests. Defaults to config.training_client_id."),
+    ),
+    verbose: bool = typer.Option(False, "--verbose", "-v", help="Enable verbose logging"),
+) -> None:
+    """Fetch and cache an option chain using the configured data source."""
+
+    config = load_config()
+    setup_logging(config.log_dir, verbose)
+
+    resolved_data_source = data_source or config.training_data_source
+    base_cache_dir = cache_dir or (config.training_cache_dir / "option_chains")
+    resolved_max_snapshots = (
+        max_snapshots if max_snapshots is not None else config.training_max_snapshots
+    )
+    resolved_snapshot_interval = (
+        snapshot_interval if snapshot_interval is not None else config.training_snapshot_interval
+    )
+    resolved_client_id = ibkr_client_id if ibkr_client_id is not None else config.training_client_id
+
+    client: OptionChainClient | None = None
+    source: object | None = None
+
+    try:
+        client, source = create_option_chain_client(
+            resolved_data_source,
+            base_cache_dir,
+            config,
+            max_snapshots=resolved_max_snapshots,
+            snapshot_interval=resolved_snapshot_interval,
+            client_id=resolved_client_id,
+        )
+
+        chain = client.get_option_chain(
+            OptionChainRequest(symbol=symbol, expiry=expiry.replace(tzinfo=UTC))
+        )
+    except SnapshotLimitError as exc:
+        logger.error("Snapshot limit reached while requesting IBKR options: %s", exc)
+        raise typer.Exit(code=1) from exc
+    except Exception as exc:  # pragma: no cover - surface errors to user
+        logger.error(f"Failed to cache option chain: {exc}")
+        raise typer.Exit(code=1) from exc
+    finally:
+        if hasattr(source, "close") and callable(source.close):
+            with suppress(Exception):
+                source.close()
+
+    logger.info(
+        "Cached option chain for %s expiring %s (%d calls, %d puts)",
+        symbol.upper(),
+        expiry.strftime("%Y-%m-%d"),
+        len(chain.calls),
+        len(chain.puts),
+    )
 
 
 if __name__ == "__main__":

@@ -116,6 +116,31 @@ ibkr-trader run --symbol AAPL -v
 3. **Test Thoroughly**: Run paper trading for several days
 4. **Read Docs**: See `README.md` for advanced features
 
+### Offline Model Training
+
+```bash
+# Train the sample regression model with cached market data
+uv run python trained_models/train_model_example.py
+
+# Or use the CLI so you can swap data sources and cache dirs
+ibkr-trader train-model --target AAPL --peer MSFT --peer GOOGL --start 2023-01-01 --end 2024-01-01
+```
+
+### Cache Option Chains
+
+```bash
+# Store an AAPL option chain (yfinance by default)
+ibkr-trader cache-option-chain --symbol AAPL --expiry 2024-01-19
+
+# Use IBKR snapshots with custom limits
+ibkr-trader cache-option-chain --symbol AAPL \
+  --expiry 2024-01-19 \
+  --data-source ibkr \
+  --max-snapshots 20 \
+  --snapshot-interval 2.0 \
+  --ibkr-client-id 210
+```
+
 ## Development Workflow
 
 ```bash
