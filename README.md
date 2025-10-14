@@ -28,6 +28,7 @@ Clean, modular design following best practices:
 - **Portfolio**: In-memory portfolio/risk tracking with daily loss and exposure guardrails,
   persisted to `data/portfolio_snapshot.json` by default for resilience
 - **Sim/Backtest**: Drop-in simulated broker/market data components and reusable engine for backtests (`ibkr_trader/sim`, `ibkr_trader/backtest`)
+- **Model**: Offline training pipelines (`model/training`) and artifact loaders (`model/registry`) kept separate from runtime execution
 - **Strategy**: Event-driven strategies that subscribe to bus updates and submit orders through a shared context
 - **CLI**: Typer-based command-line interface
 

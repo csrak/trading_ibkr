@@ -25,7 +25,13 @@ from ibkr_trader.models import (
 from ibkr_trader.portfolio import PortfolioState, RiskGuard
 from ibkr_trader.safety import LiveTradingError, LiveTradingGuard
 from ibkr_trader.sim.broker import SimulatedBroker, SimulatedMarketData
-from ibkr_trader.strategy import SimpleMovingAverageStrategy, SMAConfig, Strategy
+from ibkr_trader.strategy import (
+    IndustryModelConfig,
+    IndustryModelStrategy,
+    SimpleMovingAverageStrategy,
+    SMAConfig,
+    Strategy,
+)
 
 __all__ = [
     "BacktestEngine",
@@ -53,6 +59,8 @@ __all__ = [
     "Strategy",
     "SimpleMovingAverageStrategy",
     "SMAConfig",
+    "IndustryModelConfig",
+    "IndustryModelStrategy",
     "SimulatedBroker",
     "SimulatedMarketData",
 ]

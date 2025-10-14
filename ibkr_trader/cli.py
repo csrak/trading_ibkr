@@ -3,6 +3,7 @@
 import asyncio
 import sys
 from contextlib import AbstractAsyncContextManager, suppress
+from datetime import UTC, datetime
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
@@ -27,7 +28,12 @@ from ibkr_trader.portfolio import PortfolioState, RiskGuard
 from ibkr_trader.presets import get_preset, preset_names
 from ibkr_trader.safety import LiveTradingGuard
 from ibkr_trader.sim.broker import SimulatedBroker, SimulatedMarketData
-from ibkr_trader.strategy import SimpleMovingAverageStrategy, SMAConfig
+from ibkr_trader.strategy import (
+    IndustryModelConfig,
+    IndustryModelStrategy,
+    SimpleMovingAverageStrategy,
+    SMAConfig,
+)
 
 app = typer.Typer(
     name="ibkr-trader",
@@ -233,7 +239,6 @@ async def run_strategy(
                 await context.__aenter__()
                 stream_contexts.append(context)
 
-        # Initialize strategy
         strategy_config = SMAConfig(
             symbols=symbols,
             fast_period=fast_period,
@@ -282,9 +287,10 @@ async def run_strategy(
             while True:
                 counter += 1
 
+                event_time = datetime.now(UTC)
                 for symbol in symbols:
                     mock_price = MOCK_PRICE_BASE + Decimal(counter % MOCK_PRICE_VARIATION_MODULO)
-                    await market_data.publish_price(symbol, mock_price)
+                    await market_data.publish_price(symbol, mock_price, timestamp=event_time)
 
                 await asyncio.sleep(MOCK_PRICE_SLEEP_SECONDS)
         else:
@@ -625,6 +631,19 @@ def backtest(
     slow_period: int = typer.Option(20, "--slow", help="Slow SMA period"),
     position_size: int = typer.Option(10, "--size", help="Position size per trade"),
     verbose: bool = typer.Option(False, "--verbose", help="Enable verbose logging"),
+    strategy_name: str = typer.Option("sma", "--strategy", help="Backtest strategy (sma|industry)"),
+    model_artifact: Path | None = typer.Option(
+        None,
+        "--model-artifact",
+        exists=True,
+        readable=True,
+        help="Path to trained industry model artifact (required for industry strategy)",
+    ),
+    entry_threshold: float = typer.Option(
+        0.0,
+        "--entry-threshold",
+        help="Minimum relative edge before trading (industry strategy)",
+    ),
 ) -> None:
     """Run a backtest using historical price data from CSV."""
     config = load_config()
@@ -667,18 +686,41 @@ def backtest(
     )
     broker = SimulatedBroker(event_bus=event_bus, risk_guard=risk_guard)
 
-    strategy_config = SMAConfig(
-        symbols=[symbol],
-        fast_period=fast_period,
-        slow_period=slow_period,
-        position_size=position_size,
-    )
-    strategy = SimpleMovingAverageStrategy(
-        config=strategy_config,
-        broker=broker,
-        event_bus=event_bus,
-        risk_guard=risk_guard,
-    )
+    strategy_name_normalized = strategy_name.lower()
+    if strategy_name_normalized not in {"sma", "industry"}:
+        logger.error("Unsupported strategy '%s'", strategy_name)
+        raise typer.Exit(code=1)
+
+    if strategy_name_normalized == "industry":
+        if model_artifact is None:
+            logger.error("--model-artifact is required for industry strategy backtests")
+            raise typer.Exit(code=1)
+        industry_config = IndustryModelConfig(
+            name="IndustryModel",
+            symbols=[symbol],
+            position_size=position_size,
+            artifact_path=model_artifact,
+            entry_threshold=Decimal(str(entry_threshold)),
+        )
+        strategy = IndustryModelStrategy(
+            config=industry_config,
+            broker=broker,
+            event_bus=event_bus,
+            risk_guard=risk_guard,
+        )
+    else:
+        strategy_config = SMAConfig(
+            symbols=[symbol],
+            fast_period=fast_period,
+            slow_period=slow_period,
+            position_size=position_size,
+        )
+        strategy = SimpleMovingAverageStrategy(
+            config=strategy_config,
+            broker=broker,
+            event_bus=event_bus,
+            risk_guard=risk_guard,
+        )
 
     engine = BacktestEngine(
         symbol=symbol,

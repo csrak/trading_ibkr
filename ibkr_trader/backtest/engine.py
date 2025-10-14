@@ -47,7 +47,7 @@ class BacktestEngine:
         await strategy.start()
 
         async def _publish(price_time: datetime, price_value: Decimal) -> None:
-            await self.market_data.publish_price(self.symbol, price_value)
+            await self.market_data.publish_price(self.symbol, price_value, timestamp=price_time)
             await asyncio.sleep(0)
 
         for price_time, price_value in _normalize_bars(bars):
@@ -95,6 +95,8 @@ def _normalize_bars(
             timestamp = datetime.fromisoformat(timestamp)
         if timestamp.tzinfo is None:
             timestamp = timestamp.replace(tzinfo=UTC)
+        else:
+            timestamp = timestamp.astimezone(UTC)
         if not isinstance(price, Decimal):
             price = Decimal(str(price))
         yield timestamp, price

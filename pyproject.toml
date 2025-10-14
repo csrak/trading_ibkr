@@ -20,6 +20,10 @@ dev = [
     "mypy>=1.7.0",
     "pandas-stubs>=2.0.0",
 ]
+training = [
+    "yfinance>=0.2.30",
+    "matplotlib>=3.8.0",
+]
 
 [dependency-groups]
 dev = [
@@ -28,6 +32,10 @@ dev = [
     "ruff>=0.1.0",
     "mypy>=1.7.0",
     "pandas-stubs>=2.0.0",
+]
+training = [
+    "yfinance>=0.2.30",
+    "matplotlib>=3.8.0",
 ]
 
 [project.scripts]
@@ -57,8 +65,11 @@ disallow_untyped_defs = true
 plugins = ["pydantic.mypy"]
 
 [tool.uv]
-default-groups = ["dev"]
+default-groups = ["dev", "training"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+markers = [
+    "slow: Live data integration tests that call external services",
+]

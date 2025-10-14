@@ -7,6 +7,7 @@ from abc import ABC, abstractmethod
 from collections import deque
 from contextlib import suppress
 from decimal import Decimal
+from pathlib import Path
 
 from loguru import logger
 from pydantic import BaseModel, Field
@@ -15,6 +16,7 @@ from ibkr_trader.broker import IBKRBroker
 from ibkr_trader.events import EventBus, EventSubscription, EventTopic, MarketDataEvent
 from ibkr_trader.models import OrderRequest, OrderSide, OrderType, SymbolContract
 from ibkr_trader.portfolio import RiskGuard
+from model.inference.price_predictor import LinearIndustryArtifact
 
 
 class StrategyConfig(BaseModel):
@@ -55,6 +57,7 @@ class Strategy(ABC):
         self._subscription: EventSubscription[MarketDataEvent] | None = None
         self._task: asyncio.Task[None] | None = None
         self._last_prices: dict[str, Decimal] = {}
+        self._last_event: MarketDataEvent | None = None
 
     @abstractmethod
     async def on_bar(self, symbol: str, price: Decimal) -> None:
@@ -96,6 +99,8 @@ class Strategy(ABC):
                 symbol = event.symbol.upper()
                 if symbol not in self._symbols:
                     continue
+                self._last_event = event
+
                 price = (
                     event.price if isinstance(event.price, Decimal) else Decimal(str(event.price))
                 )
@@ -118,6 +123,9 @@ class Strategy(ABC):
             if pos.contract.symbol == symbol:
                 return pos.quantity
         return 0
+
+    def last_event(self) -> MarketDataEvent | None:
+        return self._last_event
 
     async def place_market_order(self, symbol: str, side: OrderSide, quantity: int) -> None:
         """Place a market order.
@@ -268,3 +276,51 @@ class SimpleMovingAverageStrategy(Strategy):
             f"Fast={fast_sma:.2f}, Slow={slow_sma:.2f}, "
             f"Position={current_position}"
         )
+
+
+class IndustryModelConfig(StrategyConfig):
+    artifact_path: Path = Field(..., description="Path to trained industry model artifact")
+    entry_threshold: Decimal = Field(
+        default=Decimal("0.0"),
+        description="Minimum relative edge before entering a trade",
+    )
+
+
+class IndustryModelStrategy(Strategy):
+    """Strategy that uses pre-computed model predictions to trade the target symbol."""
+
+    def __init__(
+        self,
+        config: IndustryModelConfig,
+        broker: IBKRBroker,
+        event_bus: EventBus,
+        risk_guard: RiskGuard | None = None,
+    ) -> None:
+        super().__init__(config, broker, event_bus, risk_guard=risk_guard)
+        self.config: IndustryModelConfig = config
+        artifact_path = config.artifact_path
+        self._artifact = LinearIndustryArtifact.load(artifact_path)
+        prediction_series = self._artifact.load_predictions(artifact_path)
+        self._prediction_map = {str(idx): value for idx, value in prediction_series.items()}
+
+    async def on_bar(self, symbol: str, price: Decimal) -> None:
+        event = self.last_event()
+        if event is None or event.timestamp is None:
+            return
+
+        date_key = event.timestamp.strftime("%Y-%m-%d")
+        forecast = self._prediction_map.get(date_key)
+        if forecast is None:
+            return
+
+        forecast_price = Decimal(str(forecast))
+        threshold = self.config.entry_threshold
+        upper_bound = price * (Decimal("1.0") + threshold)
+        lower_bound = price * (Decimal("1.0") - threshold)
+
+        current_position = await self.get_position(symbol)
+
+        if forecast_price >= upper_bound and current_position <= 0:
+            await self.place_market_order(symbol, OrderSide.BUY, self.config.position_size)
+        elif forecast_price <= lower_bound and current_position >= 0:
+            await self.place_market_order(symbol, OrderSide.SELL, self.config.position_size)

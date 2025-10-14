@@ -135,8 +135,11 @@ class SimulatedMarketData:
     async def stream(self, symbol: str) -> AsyncIterator[None]:
         yield
 
-    async def publish_price(self, symbol: str, price: Decimal) -> None:
+    async def publish_price(
+        self, symbol: str, price: Decimal, timestamp: datetime | None = None
+    ) -> None:
+        event_time = timestamp or datetime.now(UTC)
         await self._event_bus.publish(
             EventTopic.MARKET_DATA,
-            MarketDataEvent(symbol=symbol, price=price, timestamp=datetime.now(UTC)),
+            MarketDataEvent(symbol=symbol, price=price, timestamp=event_time),
         )
