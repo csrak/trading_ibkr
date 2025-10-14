@@ -151,3 +151,16 @@ This document describes requirements for an order-book simulation environment an
 4. Begin unit tests focusing on order manager interactions with the mock broker.
 
 Once these foundations are in place, we can proceed with building actual strategies and verifying them through simulation runs.
+
+### Sample Replay Invocation (current prototype)
+
+```bash
+# Example: run the fixed-spread market maker over recorded depth data
+uv run python -m ibkr_trader.scripts.replay_mm \
+  --order-book data/order_book/AAPL/20240102.csv \
+  --symbol AAPL \
+  --spread 0.20 \
+  --quote-size 1
+```
+
+The script launches the `FixedSpreadMMStrategy`, replays the provided order-book data, and logs fill counts, filled quantity, and ending inventory.

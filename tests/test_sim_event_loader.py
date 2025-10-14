@@ -14,6 +14,9 @@ from ibkr_trader.events import EventBus, EventTopic, ExecutionEvent
 from ibkr_trader.models import OrderRequest, OrderSide, OrderStatus, OrderType, SymbolContract
 from ibkr_trader.sim.events import EventLoader
 from ibkr_trader.sim.mock_broker import MockBroker
+from ibkr_trader.sim.runner import ReplayRunner, ReplayStrategy
+from ibkr_trader.sim.strategies import FixedSpreadMMStrategy
+from model.data.models import OrderBookSnapshot
 
 
 def _write_csv(path: Path, frame: pd.DataFrame) -> None:
@@ -122,3 +125,87 @@ async def test_mock_broker_publish_fill() -> None:
     assert isinstance(execution_event, ExecutionEvent)
     assert execution_event.quantity == 1
     assert execution_event.price == Decimal("100")
+
+
+@pytest.mark.asyncio
+async def test_replay_runner_dispatches_events(tmp_path: Path) -> None:
+    order_book_path = tmp_path / "orderbook.csv"
+    _write_csv(
+        order_book_path,
+        pd.DataFrame(
+            [
+                {
+                    "timestamp": "2024-01-01T14:00:00+00:00",
+                    "symbol": "AAPL",
+                    "side": "bid",
+                    "price": 199.5,
+                    "size": 100,
+                    "level": 1,
+                }
+            ]
+        ),
+    )
+
+    class RecordingStrategy(ReplayStrategy):
+        def __init__(self) -> None:
+            self.order_book_events: list[str] = []
+
+        async def on_order_book(self, snapshot: OrderBookSnapshot, broker: MockBroker) -> None:  # type: ignore[override]
+            self.order_book_events.append(snapshot.symbol)
+
+    strategy = RecordingStrategy()
+    loader = EventLoader(order_book_files=[order_book_path])
+    runner = ReplayRunner(loader=loader, strategy=strategy)
+
+    await runner.run()
+
+    assert strategy.order_book_events == ["AAPL"]
+
+
+@pytest.mark.asyncio
+async def test_fixed_spread_strategy_quotes_and_updates_inventory(tmp_path: Path) -> None:
+    order_book_path = tmp_path / "orderbook.csv"
+    _write_csv(
+        order_book_path,
+        pd.DataFrame(
+            [
+                {
+                    "timestamp": "2024-01-01T14:00:00+00:00",
+                    "symbol": "AAPL",
+                    "side": "bid",
+                    "price": 199.5,
+                    "size": 100,
+                    "level": 1,
+                },
+                {
+                    "timestamp": "2024-01-01T14:00:00+00:00",
+                    "symbol": "AAPL",
+                    "side": "ask",
+                    "price": 200.5,
+                    "size": 100,
+                    "level": 1,
+                },
+            ]
+        ),
+    )
+
+    class AutoFillStrategy(FixedSpreadMMStrategy):
+        async def on_order_book(self, snapshot: OrderBookSnapshot, broker: MockBroker) -> None:  # type: ignore[override]
+            await super().on_order_book(snapshot, broker)
+            if self.active_bid_id is not None and not hasattr(self, "_filled"):
+                self._filled = True
+                await broker.simulate_fill(
+                    order_id=self.active_bid_id,
+                    fill_quantity=self.quote_size,
+                    fill_price=Decimal("199.4"),
+                )
+
+    strategy = AutoFillStrategy(symbol="AAPL", quote_size=1, spread=0.2, inventory_limit=2)
+    loader = EventLoader(order_book_files=[order_book_path])
+    runner = ReplayRunner(loader=loader, strategy=strategy)
+
+    await runner.run()
+
+    assert strategy.active_bid_id is not None
+    assert strategy.active_ask_id is not None
+    assert strategy.inventory == 1
