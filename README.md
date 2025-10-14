@@ -2,21 +2,21 @@
 
 A **safe, modular, and type-safe** trading platform for Interactive Brokers TWS, built with Python 3.12+.
 
-## 🛡️ Safety First
+## Safety First
 
 **This platform defaults to PAPER TRADING mode.** Live trading requires explicit flags and multi-step acknowledgment to prevent accidental real-money trades.
 
 ### Safety Features
 
-- ✅ Paper trading by default
-- ✅ `LiveTradingGuard` prevents accidental live orders
-- ✅ Multi-step authentication for live trading
-- ✅ Position size limits
-- ✅ Daily loss limits
-- ✅ Type-safe with `mypy --strict`
-- ✅ Pydantic v2 validation on all I/O
+- Paper trading by default
+- `LiveTradingGuard` prevents accidental live orders
+- Multi-step authentication for live trading
+- Position size limits
+- Daily loss limits
+- Type-safe with `mypy --strict`
+- Pydantic v2 validation on all I/O
 
-## 🏗️ Architecture
+## Architecture
 
 Clean, modular design following best practices:
 
@@ -32,7 +32,7 @@ Clean, modular design following best practices:
 - **Strategy**: Event-driven strategies that subscribe to bus updates and submit orders through a shared context
 - **CLI**: Typer-based command-line interface
 
-## 📦 Installation
+## Installation
 
 ### Prerequisites
 
@@ -83,7 +83,7 @@ IBKR_MAX_ORDER_EXPOSURE=10000.0
 IBKR_USE_MOCK_MARKET_DATA=true  # Set to false to stream real market data (requires entitlements)
 ```
 
-## 🚀 Quick Start
+## Quick Start
 
 ### Check Connection
 
@@ -123,12 +123,12 @@ ibkr-trader run --symbol AAPL --size 50
 ibkr-trader run --symbol AAPL -v
 ```
 
-## 📘 Documentation
+## Documentation
 
 - [Quick Start Guide](QUICKSTART.md) — installation and first trades.
 - [Model Training & Data Caching Guide](docs/model_training_guide.md) — step-by-step walkthrough for preparing data, caching option chains, and training the sample model.
 
-## ⚠️ Live Trading (Use with Extreme Caution)
+## Live Trading (Use with Extreme Caution)
 
 Live trading requires **three explicit steps**:
 
@@ -150,7 +150,7 @@ ibkr-trader run --symbol AAPL --live
 The system will display a warning and ask for explicit confirmation:
 
 ```
-⚠️  LIVE TRADING MODE DETECTED  ⚠️
+LIVE TRADING MODE DETECTED
 You are about to trade with REAL MONEY
 This can result in REAL FINANCIAL LOSS
 
@@ -166,7 +166,7 @@ Do you acknowledge the risks and want to proceed with LIVE trading? [y/N]:
 - Historical data requests via IBKR count against market data permissions but do not add extra fees; consider free sources (e.g., Yahoo Finance) for backtesting or long lookbacks.
 - Strategies should stay within the exchange’s streaming limits—keep concurrent subscriptions modest to avoid IBKR throttling.
 
-## 📊 Built-in Strategy: SMA Crossover
+## Built-in Strategy: SMA Crossover
 
 A simple moving average crossover strategy for testing:
 
@@ -178,7 +178,7 @@ A simple moving average crossover strategy for testing:
 - `--slow`: Slow SMA period (default: 20)
 - `--size`: Position size per trade (default: 10)
 
-## 🧪 Development
+## Development
 
 ### Running Tests
 
@@ -232,7 +232,7 @@ class MyStrategy(Strategy):
             )
 ```
 
-## 📁 Project Structure
+## Project Structure
 
 ```
 ibkr-personal-trader/
@@ -252,7 +252,7 @@ ibkr-personal-trader/
 └── README.md
 ```
 
-## 🔒 Safety Philosophy
+## Safety Philosophy
 
 1. **Paper by Default**: All trading defaults to paper mode
 2. **Explicit Intent**: Live trading requires multiple explicit actions
@@ -261,22 +261,22 @@ ibkr-personal-trader/
 5. **Validation**: Pydantic v2 validates all inputs
 6. **Logging**: Comprehensive logging of all actions
 
-## ⚡ Features
+## Feature Summary
 
-- ✅ Paper trading by default
-- ✅ Type-safe with `mypy --strict`
-- ✅ Pydantic v2 for all I/O
-- ✅ Async/await for concurrent operations
-- ✅ Comprehensive logging with loguru
-- ✅ CLI with typer
-- ✅ Full test coverage
-- ✅ Modular, clean architecture
-- ✅ Position size limits
-- ✅ Daily loss limits
-- ✅ Real-time market data support
-- ✅ Order execution with safety guards
+- Paper trading by default
+- Type-safe with `mypy --strict`
+- Pydantic v2 for all I/O
+- Async/await for concurrent operations
+- Comprehensive logging with loguru
+- CLI with typer
+- Full test coverage
+- Modular, clean architecture
+- Position size limits
+- Daily loss limits
+- Real-time market data support
+- Order execution with safety guards
 
-## 🎯 Roadmap
+## Roadmap
 
 - [ ] Backtesting framework
 - [ ] More built-in strategies
@@ -286,7 +286,7 @@ ibkr-personal-trader/
 - [ ] WebSocket market data
 - [ ] Multiple broker support
 
-## ⚠️ Disclaimer
+## Disclaimer
 
 **This software is for educational purposes only. Trading involves substantial risk of loss. The authors are not responsible for any financial losses incurred through use of this software.**
 
@@ -297,11 +297,11 @@ Always:
 - Understand your strategy completely
 - Monitor your positions actively
 
-## 📝 License
+## License
 
 MIT License - see LICENSE file for details
 
-## 🤝 Contributing
+## Contributing
 
 Contributions welcome! Please:
 
@@ -311,10 +311,13 @@ Contributions welcome! Please:
 4. Update documentation
 5. Never compromise safety features
 
-## 📞 Support
+## Support
 
-- Issues: [GitHub Issues](https://github.com/your-repo/issues)
-- Docs: [Full Documentation](https://docs.your-site.com)
+- Issues: open a ticket via the project's GitHub repository
+- Documentation:
+  - [Quick Start Guide](QUICKSTART.md)
+  - [Model Training & Data Caching Guide](docs/model_training_guide.md)
+  - [Market Making Simulation Plan](docs/market_making/simulation_plan.md)
 
 ---
 

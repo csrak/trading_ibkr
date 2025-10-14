@@ -48,7 +48,10 @@ def test_strategy_factory_creates_fixed_spread_strategy() -> None:
 def test_vol_overlay_config_loads() -> None:
     config = VolatilityOverlayConfig(symbol="SPY", execution={"volatility_target": 0.12})
     strategy = StrategyFactory.create(config)
-    assert strategy.parameters.volatility_target == 0.12
+    from ibkr_trader.sim.advanced_strategies import VolatilityOverlayStrategy
+
+    assert isinstance(strategy, VolatilityOverlayStrategy)
+    assert strategy.config.execution.volatility_target == 0.12
 
 
 def test_additional_strategy_configs_create_stub_strategies() -> None:

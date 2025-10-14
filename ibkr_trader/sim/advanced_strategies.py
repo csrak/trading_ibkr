@@ -13,6 +13,7 @@ from ibkr_trader.strategy_configs.config import (
     MicrostructureMLConfig,
     RegimeRotationConfig,
     SkewArbitrageConfig,
+    VolatilityOverlayConfig,
     VolSpilloverConfig,
 )
 from model.data.models import OptionSurfaceEntry, OrderBookSnapshot, TradeEvent
@@ -226,3 +227,74 @@ class VolSpilloverStrategy(ReplayStrategy):
             spread = abs(returns[0] - returns[1])
             if spread >= self.config.execution.spillover_threshold:
                 self.alerts.append((pair, spread))
+
+
+class VolatilityOverlayStrategy(ReplayStrategy):
+    """Volatility-targeted directional overlay using simple conviction signals."""
+
+    def __init__(self, config: VolatilityOverlayConfig) -> None:
+        self.config = config
+        self.prices: deque[float] = deque(maxlen=config.execution.lookback_window)
+        self.returns: deque[float] = deque(maxlen=max(2, config.execution.lookback_window))
+        self.position = 0
+        self.target_history: list[int] = []
+
+    async def on_order_book(self, snapshot: OrderBookSnapshot, broker: MockBroker) -> None:  # type: ignore[override]
+        if snapshot.symbol != self.config.symbol:
+            return
+        if not snapshot.levels:
+            return
+        mid = sum(level.price for level in snapshot.levels) / len(snapshot.levels)
+        if hasattr(self, "_last_mid"):
+            ret = (mid - self._last_mid) / max(self._last_mid, 1e-9)
+            self.returns.append(ret)
+        self._last_mid = mid
+        self.prices.append(mid)
+
+        if len(self.prices) < self.prices.maxlen:
+            return
+
+        direction = self._conviction()
+        target_units = self._target_units()
+        desired_position = direction * target_units
+        self.target_history.append(desired_position)
+
+        delta = desired_position - self.position
+        if delta == 0:
+            return
+
+        side = OrderSide.BUY if delta > 0 else OrderSide.SELL
+        order = OrderRequest(
+            contract=SymbolContract(symbol=self.config.symbol),
+            side=side,
+            quantity=abs(delta),
+            order_type=OrderType.LIMIT,
+            limit_price=mid,
+        )
+        await broker.submit_limit_order(order)
+
+    async def on_fill(self, side: OrderSide, quantity: int) -> None:
+        self.position += quantity if side == OrderSide.BUY else -quantity
+
+    def _conviction(self) -> int:
+        execution = self.config.execution
+        if execution.conviction_signal == "ma_cross":
+            prices = list(self.prices)
+            fast = max(2, execution.lookback_window // 4)
+            slow = max(fast + 1, execution.lookback_window)
+            fast_ma = fmean(prices[-fast:])
+            slow_ma = fmean(prices[-slow:])
+            return 1 if fast_ma > slow_ma else -1
+        # default: price above mean => long
+        mean_price = fmean(self.prices)
+        return 1 if self.prices[-1] >= mean_price else -1
+
+    def _target_units(self) -> int:
+        execution = self.config.execution
+        target_vol = execution.volatility_target or 0.1
+        if len(self.returns) < 2:
+            return 1
+        realized_vol = pstdev(self.returns) or 1e-9
+        raw_units = target_vol / realized_vol
+        capped = min(raw_units, execution.leverage_cap or raw_units)
+        return max(1, int(round(capped)))

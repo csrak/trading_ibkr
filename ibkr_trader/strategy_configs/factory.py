@@ -9,6 +9,7 @@ from ibkr_trader.sim.advanced_strategies import (
     MicrostructureMLStrategy,
     RegimeRotationStrategy,
     SkewArbitrageStrategy,
+    VolatilityOverlayStrategy,
     VolSpilloverStrategy,
 )
 from ibkr_trader.sim.runner import ReplayStrategy
@@ -53,16 +54,9 @@ def _create_fixed_spread_mm(config: StrategyConfig) -> ReplayStrategy:
     )
 
 
-class ConfigBackedStrategy(ReplayStrategy):
-    def __init__(self, config: StrategyConfig) -> None:
-        self.config = config
-
-
 def _create_vol_overlay(config: StrategyConfig) -> ReplayStrategy:
     cfg = VolatilityOverlayConfig.model_validate(config.model_dump())
-    result = ConfigBackedStrategy(cfg)
-    result.parameters = cfg.execution  # type: ignore[attr-defined]
-    return result
+    return VolatilityOverlayStrategy(cfg)
 
 
 StrategyFactory.register("fixed_spread_mm", _create_fixed_spread_mm)

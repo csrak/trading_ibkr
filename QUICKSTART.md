@@ -68,7 +68,7 @@ ibkr-trader run --symbol AAPL
 Expected output:
 ```
 ======================================================================
-📄  IBKR PERSONAL TRADER  📄
+IBKR PERSONAL TRADER
 Mode: PAPER
 Port: 7497
 Symbols: AAPL
@@ -159,12 +159,12 @@ ruff format ibkr_trader
 
 **Never skip paper trading!** Always:
 
-1. ✅ Test new strategies in paper mode
-2. ✅ Run for at least a week in paper mode
-3. ✅ Verify all logs and behavior
-4. ✅ Understand every order placed
-5. ✅ Start with small position sizes in live mode
+1. Test new strategies in paper mode
+2. Run for at least a week in paper mode
+3. Verify all logs and behavior
+4. Understand every order placed
+5. Start with small position sizes in live mode
 
 ---
 
-**Happy (paper) trading! 📄💹**
+Happy paper trading!

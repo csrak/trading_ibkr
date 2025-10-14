@@ -61,7 +61,7 @@ class LiveTradingGuard:
         """
         if self.config.trading_mode == TradingMode.LIVE and self.live_flag_enabled:
             self._live_acknowledged = True
-            logger.warning("⚠️  LIVE TRADING ACKNOWLEDGED - REAL MONEY AT RISK ⚠️")
+            logger.warning("Live trading acknowledged - real money at risk")
         else:
             logger.info("Paper trading mode - no real money at risk")
 
@@ -96,7 +96,7 @@ class LiveTradingGuard:
             "1. Set IBKR_TRADING_MODE=live in your environment\n"
             "2. Pass --live flag when running the CLI\n"
             "3. Explicitly acknowledge live trading when prompted\n"
-            "⚠️  LIVE TRADING INVOLVES REAL MONEY - USE WITH EXTREME CAUTION ⚠️"
+            "Live trading involves real money - use with extreme caution"
         )
         logger.error(error_msg)
         raise LiveTradingError(error_msg)

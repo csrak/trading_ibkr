@@ -165,7 +165,7 @@ def run(
     live: bool = typer.Option(
         False,
         "--live",
-        help="⚠️  ENABLE LIVE TRADING (real money at risk) ⚠️",
+        help="Enable live trading (real money at risk)",
     ),
     fast_period: int = typer.Option(
         10,
@@ -206,9 +206,8 @@ def run(
     setup_logging(config.log_dir, verbose)
 
     # Display mode prominently
-    mode_symbol = "📄" if config.trading_mode == TradingMode.PAPER else "⚠️"
     logger.info("=" * 70)
-    logger.info(f"{mode_symbol}  IBKR PERSONAL TRADER  {mode_symbol}")
+    logger.info("IBKR PERSONAL TRADER")
     logger.info(f"Mode: {config.trading_mode.value.upper()}")
     logger.info(f"Port: {config.port}")
     logger.info(f"Symbols: {', '.join(symbols)}")
@@ -227,9 +226,9 @@ def run(
     # Prompt for live trading acknowledgment if needed
     if config.trading_mode == TradingMode.LIVE and live:
         logger.warning("=" * 70)
-        logger.warning("⚠️  LIVE TRADING MODE DETECTED  ⚠️")
-        logger.warning("You are about to trade with REAL MONEY")
-        logger.warning("This can result in REAL FINANCIAL LOSS")
+        logger.warning("LIVE TRADING MODE DETECTED")
+        logger.warning("You are about to trade with real money")
+        logger.warning("This can result in real financial loss")
         logger.warning("=" * 70)
 
         confirm = typer.confirm(
