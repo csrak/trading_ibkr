@@ -53,6 +53,9 @@ dmypy.json
 
 # Project specific
 data/
+!model/
+!model/data/
+!model/data/**
 logs/
 *.log
 
