@@ -4,6 +4,13 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
+from ibkr_trader.sim.advanced_strategies import (
+    MeanReversionStrategy,
+    MicrostructureMLStrategy,
+    RegimeRotationStrategy,
+    SkewArbitrageStrategy,
+    VolSpilloverStrategy,
+)
 from ibkr_trader.sim.runner import ReplayStrategy
 from ibkr_trader.sim.strategies import FixedSpreadMMStrategy
 
@@ -53,30 +60,30 @@ class ConfigBackedStrategy(ReplayStrategy):
 
 def _create_vol_overlay(config: StrategyConfig) -> ReplayStrategy:
     cfg = VolatilityOverlayConfig.model_validate(config.model_dump())
-    strategy = ConfigBackedStrategy(cfg)
-    strategy.parameters = cfg.execution  # type: ignore[attr-defined]
-    return strategy
+    result = ConfigBackedStrategy(cfg)
+    result.parameters = cfg.execution  # type: ignore[attr-defined]
+    return result
 
 
 StrategyFactory.register("fixed_spread_mm", _create_fixed_spread_mm)
 StrategyFactory.register("vol_overlay", _create_vol_overlay)
 StrategyFactory.register(
     "mean_reversion",
-    lambda cfg: ConfigBackedStrategy(MeanReversionConfig.model_validate(cfg.model_dump())),
+    lambda cfg: MeanReversionStrategy(MeanReversionConfig.model_validate(cfg.model_dump())),
 )
 StrategyFactory.register(
     "skew_arb",
-    lambda cfg: ConfigBackedStrategy(SkewArbitrageConfig.model_validate(cfg.model_dump())),
+    lambda cfg: SkewArbitrageStrategy(SkewArbitrageConfig.model_validate(cfg.model_dump())),
 )
 StrategyFactory.register(
     "microstructure_ml",
-    lambda cfg: ConfigBackedStrategy(MicrostructureMLConfig.model_validate(cfg.model_dump())),
+    lambda cfg: MicrostructureMLStrategy(MicrostructureMLConfig.model_validate(cfg.model_dump())),
 )
 StrategyFactory.register(
     "regime_rotation",
-    lambda cfg: ConfigBackedStrategy(RegimeRotationConfig.model_validate(cfg.model_dump())),
+    lambda cfg: RegimeRotationStrategy(RegimeRotationConfig.model_validate(cfg.model_dump())),
 )
 StrategyFactory.register(
     "vol_spillover",
-    lambda cfg: ConfigBackedStrategy(VolSpilloverConfig.model_validate(cfg.model_dump())),
+    lambda cfg: VolSpilloverStrategy(VolSpilloverConfig.model_validate(cfg.model_dump())),
 )
