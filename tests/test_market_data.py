@@ -1,71 +1,91 @@
-"""Tests for market data service."""
+'"""Tests for market data abstractions and caching."""'
 
 from __future__ import annotations
 
-import asyncio
-from decimal import Decimal
-from types import SimpleNamespace
+from datetime import UTC, datetime
+from pathlib import Path
 
+import pandas as pd
 import pytest
-from eventkit import Event
-from ib_insync import Contract
 
-from ibkr_trader.events import EventBus, EventTopic, MarketDataEvent
-from ibkr_trader.market_data import MarketDataService, SubscriptionRequest
-from ibkr_trader.models import SymbolContract
-
-
-class DummyIB:
-    def __init__(self) -> None:
-        self._ticker = SimpleNamespace()
-        self._ticker.contract = Contract()
-        self._ticker.updateEvent = Event()
-        self._ticker.last = None
-        self._ticker.close = None
-        self._ticker.marketPrice = lambda: None
-        self._ticker.midpoint = lambda: None
-
-    async def qualifyContractsAsync(  # noqa: N802
-        self, contract: Contract
-    ) -> list[Contract]:
-        self._ticker.contract = contract
-        return [contract]
-
-    def reqMktData(  # noqa: N802
-        self, contract: Contract, *_args: object
-    ) -> SimpleNamespace:
-        self._ticker.contract = contract
-        return self._ticker
-
-    def cancelMktData(self, contract: Contract) -> None:  # noqa: N802
-        return None
+from model.data.cache_store import FileCacheStore
+from model.data.client import MarketDataClient
+from model.data.market_data import MarketDataSource, PriceBarRequest
+from model.data.sources import YFinanceMarketDataSource
 
 
-@pytest.mark.asyncio
-async def test_publish_price_emits_event() -> None:
-    bus = EventBus()
-    service = MarketDataService(event_bus=bus)
-    subscription = bus.subscribe(EventTopic.MARKET_DATA)
+class DummySource(MarketDataSource):
+    def __init__(self, frame: pd.DataFrame) -> None:
+        self.frame = frame
+        self.calls = 0
 
-    await service.publish_price("AAPL", Decimal("123.45"))
-
-    event = await asyncio.wait_for(subscription.get(), timeout=0.1)
-    assert isinstance(event, MarketDataEvent)
-    assert event.symbol == "AAPL"
-    assert event.price == Decimal("123.45")
-    subscription.close()
+    def get_price_bars(self, request: PriceBarRequest) -> pd.DataFrame:
+        self.calls += 1
+        return self.frame
 
 
-@pytest.mark.asyncio
-async def test_subscription_context_tracks_counts() -> None:
-    bus = EventBus()
-    service = MarketDataService(event_bus=bus)
-    contract = SymbolContract(symbol="AAPL")
-    request = SubscriptionRequest(contract=contract)
-    service.attach_ib(DummyIB())
+def sample_frame() -> pd.DataFrame:
+    idx = pd.date_range("2024-01-01", periods=3, freq="D")
+    return pd.DataFrame({"open": [1, 2, 3], "close": [1.5, 2.5, 3.5]}, index=idx)
 
-    async with service.subscribe(request):
-        # inside the context, a publish still works
-        await service.publish_price("AAPL", Decimal("1"))
 
-    # Nothing to assert directly; ensure context exits without issue
+def test_file_cache_store_roundtrip(tmp_path: Path) -> None:
+    cache = FileCacheStore(tmp_path)
+    request = PriceBarRequest(
+        symbol="AAPL",
+        start=datetime(2024, 1, 1, tzinfo=UTC),
+        end=datetime(2024, 1, 4, tzinfo=UTC),
+    )
+    frame = sample_frame()
+
+    cache.store_price_bars(request, frame)
+    reloaded = cache.load_price_bars(request)
+
+    assert reloaded is not None
+    pd.testing.assert_frame_equal(reloaded, frame, check_freq=False)
+
+
+def test_market_data_client_uses_cache(tmp_path: Path) -> None:
+    request = PriceBarRequest(
+        symbol="MSFT",
+        start=datetime(2024, 2, 1, tzinfo=UTC),
+        end=datetime(2024, 2, 3, tzinfo=UTC),
+    )
+    frame = sample_frame()
+    source = DummySource(frame)
+    cache = FileCacheStore(tmp_path)
+    client = MarketDataClient(source=source, cache=cache)
+
+    result_first = client.get_price_bars(request)
+    result_second = client.get_price_bars(request)
+
+    assert source.calls == 1
+    pd.testing.assert_frame_equal(result_first, frame, check_freq=False)
+    pd.testing.assert_frame_equal(result_second, frame, check_freq=False)
+
+
+def test_yfinance_source_normalizes_columns(monkeypatch: pytest.MonkeyPatch) -> None:
+    request = PriceBarRequest(
+        symbol="GOOG",
+        start=datetime(2024, 3, 1, tzinfo=UTC),
+        end=datetime(2024, 3, 10, tzinfo=UTC),
+    )
+
+    multi_index_frame = pd.DataFrame(
+        {
+            ("Adj Close", "GOOG"): [100.0, 101.0],
+            ("Volume", "GOOG"): [10, 20],
+        },
+        index=pd.date_range("2024-03-01", periods=2, freq="D"),
+    )
+
+    def fake_download(*args: object, **kwargs: object) -> pd.DataFrame:
+        return multi_index_frame
+
+    monkeypatch.setattr("yfinance.download", fake_download)
+    source = YFinanceMarketDataSource()
+    frame = source.get_price_bars(request)
+
+    assert "adj_close_goog" in frame.columns
+    assert "volume_goog" in frame.columns
+    assert not frame.empty
