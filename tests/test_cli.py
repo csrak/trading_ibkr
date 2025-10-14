@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -211,6 +212,224 @@ def test_paper_order_preview(monkeypatch: pytest.MonkeyPatch) -> None:
 
     assert result.exit_code == 0, result.stdout
     assert dummy_broker.preview_called
+
+
+def test_train_model_cli_uses_data_client(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    config = IBKRConfig(trading_mode=TradingMode.PAPER)
+    monkeypatch.setattr(cli, "load_config", lambda: config)
+    monkeypatch.setattr(cli, "setup_logging", lambda *_args, **_kwargs: None)
+
+    captured: dict[str, object] = {}
+
+    def fake_train_linear_industry_model(**kwargs: object) -> Path:
+        captured.update(kwargs)
+        artifact_dir = kwargs["artifact_dir"]
+        assert isinstance(artifact_dir, Path)
+        artifact_dir.mkdir(parents=True, exist_ok=True)
+        model_path = artifact_dir / "artifact.json"
+        model_path.write_text("{}")
+        predictions_path = artifact_dir / f"{kwargs['target_symbol']}_predictions.csv"
+        predictions_path.write_text("timestamp,predicted_price\n")
+        return model_path
+
+    monkeypatch.setattr(cli, "train_linear_industry_model", fake_train_linear_industry_model)
+
+    source_closed = {"value": False}
+    captured_create: dict[str, object] = {}
+
+    class DummySource:
+        def close(self) -> None:
+            source_closed["value"] = True
+
+    dummy_client = object()
+
+    def fake_create_market_data_client(
+        source_name: str,
+        cache_dir_param: Path,
+        config_param: IBKRConfig,
+        *,
+        max_snapshots: int,
+        snapshot_interval: float,
+        client_id: int,
+    ) -> tuple[object, DummySource]:
+        captured_create.update(
+            {
+                "source_name": source_name,
+                "cache_dir": cache_dir_param,
+                "max_snapshots": max_snapshots,
+                "snapshot_interval": snapshot_interval,
+                "client_id": client_id,
+                "config_id": config_param.client_id,
+            }
+        )
+        return dummy_client, DummySource()
+
+    monkeypatch.setattr(
+        cli,
+        "create_market_data_client",
+        fake_create_market_data_client,
+    )
+
+    result = runner.invoke(
+        cli.app,
+        [
+            "train-model",
+            "--target",
+            "AAPL",
+            "--peer",
+            "MSFT",
+            "--start",
+            "2024-01-01",
+            "--end",
+            "2024-02-01",
+            "--artifact-dir",
+            str(tmp_path / "artifacts"),
+            "--cache-dir",
+            str(tmp_path / "cache"),
+        ],
+    )
+
+    assert result.exit_code == 0, result.stdout
+    assert captured.get("data_client") is dummy_client
+    assert source_closed["value"] is True
+    assert captured_create["source_name"] == config.training_data_source
+    assert captured_create["cache_dir"] == (tmp_path / "cache")
+    assert captured_create["max_snapshots"] == config.training_max_snapshots
+    assert captured_create["snapshot_interval"] == config.training_snapshot_interval
+    assert captured_create["client_id"] == config.training_client_id
+
+
+def test_train_model_cli_allows_ibkr_overrides(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    config = IBKRConfig(
+        trading_mode=TradingMode.PAPER,
+        training_data_source="ibkr",
+        training_client_id=222,
+        training_max_snapshots=5,
+        training_snapshot_interval=2.0,
+    )
+    monkeypatch.setattr(cli, "load_config", lambda: config)
+    monkeypatch.setattr(cli, "setup_logging", lambda *_args, **_kwargs: None)
+
+    captured_kwargs: dict[str, object] = {}
+
+    def fake_train(**kwargs: object) -> Path:
+        captured_kwargs.update(kwargs)
+        artifact_dir = Path(kwargs["artifact_dir"])
+        artifact_dir.mkdir(parents=True, exist_ok=True)
+        model_path = artifact_dir / "artifact.json"
+        model_path.write_text("{}")
+        (artifact_dir / f"{kwargs['target_symbol']}_predictions.csv").write_text(
+            "timestamp,predicted_price\n"
+        )
+        return model_path
+
+    monkeypatch.setattr(cli, "train_linear_industry_model", fake_train)
+
+    source_closed = {"value": False}
+
+    class DummySource:
+        def close(self) -> None:
+            source_closed["value"] = True
+
+    create_calls: dict[str, object] = {}
+
+    def fake_create(
+        source_name: str,
+        cache_dir_param: Path,
+        config_param: IBKRConfig,
+        *,
+        max_snapshots: int,
+        snapshot_interval: float,
+        client_id: int,
+    ) -> tuple[object, DummySource]:
+        create_calls.update(
+            {
+                "source_name": source_name,
+                "cache_dir": cache_dir_param,
+                "max_snapshots": max_snapshots,
+                "snapshot_interval": snapshot_interval,
+                "client_id": client_id,
+            }
+        )
+        return object(), DummySource()
+
+    monkeypatch.setattr(cli, "create_market_data_client", fake_create)
+
+    result = runner.invoke(
+        cli.app,
+        [
+            "train-model",
+            "--target",
+            "AAPL",
+            "--peer",
+            "MSFT",
+            "--start",
+            "2024-01-01",
+            "--end",
+            "2024-02-01",
+            "--data-source",
+            "ibkr",
+            "--cache-dir",
+            str(tmp_path / "ibkr-cache"),
+            "--max-snapshots",
+            "3",
+            "--snapshot-interval",
+            "0.5",
+            "--ibkr-client-id",
+            "333",
+            "--artifact-dir",
+            str(tmp_path / "artifacts"),
+        ],
+    )
+
+    assert result.exit_code == 0, result.stdout
+    assert create_calls["source_name"] == "ibkr"
+    assert create_calls["cache_dir"] == (tmp_path / "ibkr-cache")
+    assert create_calls["max_snapshots"] == 3
+    assert create_calls["snapshot_interval"] == 0.5
+    assert create_calls["client_id"] == 333
+    assert captured_kwargs["data_client"] is not None
+    assert source_closed["value"] is True
+
+
+def test_train_model_cli_rejects_unknown_source(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    config = IBKRConfig(trading_mode=TradingMode.PAPER)
+    monkeypatch.setattr(cli, "load_config", lambda: config)
+    monkeypatch.setattr(cli, "setup_logging", lambda *_args, **_kwargs: None)
+
+    monkeypatch.setattr(
+        cli,
+        "train_linear_industry_model",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("should not train")),
+    )
+
+    result = runner.invoke(
+        cli.app,
+        [
+            "train-model",
+            "--target",
+            "AAPL",
+            "--peer",
+            "MSFT",
+            "--start",
+            "2024-01-01",
+            "--end",
+            "2024-02-01",
+            "--data-source",
+            "invalid",
+            "--artifact-dir",
+            str(tmp_path / "artifacts"),
+            "--cache-dir",
+            str(tmp_path / "cache"),
+        ],
+    )
+
+    assert result.exit_code != 0
+    assert "Unsupported data source" in result.stdout or result.stderr
 
 
 def test_paper_quick_lists_presets() -> None:

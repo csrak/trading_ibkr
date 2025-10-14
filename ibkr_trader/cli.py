@@ -34,6 +34,14 @@ from ibkr_trader.strategy import (
     SimpleMovingAverageStrategy,
     SMAConfig,
 )
+from model.data import (
+    FileCacheStore,
+    IBKRMarketDataSource,
+    MarketDataClient,
+    SnapshotLimitError,
+    YFinanceMarketDataSource,
+)
+from model.training.industry_model import train_linear_industry_model
 
 app = typer.Typer(
     name="ibkr-trader",
@@ -69,6 +77,41 @@ def setup_logging(log_dir: Path, verbose: bool = False) -> None:
         retention="7 days",
         level="DEBUG",
     )
+
+
+def create_market_data_client(
+    source_name: str,
+    cache_dir: Path,
+    config: "IBKRConfig",  # noqa: F821
+    *,
+    max_snapshots: int,
+    snapshot_interval: float,
+    client_id: int,
+) -> tuple[MarketDataClient, object]:
+    """Instantiate a market data client for training workflows."""
+
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    cache = FileCacheStore(cache_dir)
+    normalized = source_name.strip().lower()
+
+    if normalized == "yfinance":
+        source = YFinanceMarketDataSource()
+    elif normalized == "ibkr":
+        source = IBKRMarketDataSource(
+            host=config.host,
+            port=config.port,
+            client_id=client_id,
+            max_snapshots_per_session=max_snapshots,
+            min_request_interval_seconds=snapshot_interval,
+        )
+    else:
+        raise typer.BadParameter(
+            "Unsupported data source. Choose 'yfinance' or 'ibkr'.",
+            param_hint="--data-source",
+        )
+
+    client = MarketDataClient(source=source, cache=cache)
+    return client, source
 
 
 @app.command()
@@ -734,6 +777,147 @@ def backtest(
     asyncio.run(engine.run(strategy, bars))
 
     logger.info("Backtest completed with %s executions", len(broker.execution_events))
+
+
+@app.command("train-model")
+def train_model_command(
+    target_symbol: str = typer.Option(..., "--target", help="Target symbol to forecast"),
+    peer_symbols: list[str] = typer.Option(
+        ["MSFT", "GOOGL"],
+        "--peer",
+        "-p",
+        help="Peer symbols (repeat for multiple)",
+        show_default=True,
+    ),
+    start: datetime = typer.Option(
+        ...,
+        "--start",
+        formats=["%Y-%m-%d"],
+        help="Training window start date (YYYY-MM-DD)",
+    ),
+    end: datetime = typer.Option(
+        ...,
+        "--end",
+        formats=["%Y-%m-%d"],
+        help="Training window end date (YYYY-MM-DD)",
+    ),
+    horizon_days: int = typer.Option(5, "--horizon", help="Prediction horizon in trading days"),
+    artifact_dir: Path = typer.Option(
+        Path("model/artifacts/industry_forecast"),
+        "--artifact-dir",
+        resolve_path=True,
+        help="Directory to store model artifacts",
+    ),
+    data_source: str | None = typer.Option(
+        None,
+        "--data-source",
+        help=(
+            "Market data source identifier (yfinance|ibkr). "
+            "Defaults to config.training_data_source."
+        ),
+    ),
+    cache_dir: Path | None = typer.Option(
+        None,
+        "--cache-dir",
+        resolve_path=True,
+        help=(
+            "Local cache directory for downloaded market data. "
+            "Defaults to config.training_cache_dir."
+        ),
+    ),
+    max_snapshots: int | None = typer.Option(
+        None,
+        "--max-snapshots",
+        help=(
+            "Maximum historical data requests per session (IBKR only). "
+            "Defaults to config.training_max_snapshots."
+        ),
+    ),
+    snapshot_interval: float | None = typer.Option(
+        None,
+        "--snapshot-interval",
+        help=(
+            "Minimum seconds between IBKR historical requests. "
+            "Defaults to config.training_snapshot_interval."
+        ),
+    ),
+    ibkr_client_id: int | None = typer.Option(
+        None,
+        "--ibkr-client-id",
+        help=(
+            "Client ID to use for IBKR historical requests. Defaults to config.training_client_id."
+        ),
+    ),
+    verbose: bool = typer.Option(False, "--verbose", "-v", help="Enable verbose logging"),
+) -> None:
+    """Train the sample industry model using the configured data source."""
+
+    if not peer_symbols:
+        raise typer.BadParameter("At least one --peer symbol is required.", param_hint="--peer")
+
+    if target_symbol in peer_symbols:
+        raise typer.BadParameter(
+            "Target symbol must not be present in the peer list.",
+            param_hint="--peer",
+        )
+
+    config = load_config()
+    setup_logging(config.log_dir, verbose)
+
+    artifact_dir.mkdir(parents=True, exist_ok=True)
+
+    resolved_data_source = data_source or config.training_data_source
+    resolved_cache_dir = cache_dir or config.training_cache_dir
+    resolved_max_snapshots = (
+        max_snapshots if max_snapshots is not None else config.training_max_snapshots
+    )
+    resolved_snapshot_interval = (
+        snapshot_interval if snapshot_interval is not None else config.training_snapshot_interval
+    )
+    resolved_client_id = ibkr_client_id if ibkr_client_id is not None else config.training_client_id
+
+    client: MarketDataClient | None = None
+    source: object | None = None
+
+    try:
+        client, source = create_market_data_client(
+            resolved_data_source,
+            resolved_cache_dir,
+            config,
+            max_snapshots=resolved_max_snapshots,
+            snapshot_interval=resolved_snapshot_interval,
+            client_id=resolved_client_id,
+        )
+
+        artifact_path = train_linear_industry_model(
+            target_symbol=target_symbol,
+            peer_symbols=peer_symbols,
+            start=start.strftime("%Y-%m-%d"),
+            end=end.strftime("%Y-%m-%d"),
+            horizon_days=horizon_days,
+            artifact_dir=artifact_dir,
+            data_client=client,
+        )
+
+    except SnapshotLimitError as exc:
+        logger.error("Snapshot limit reached while requesting IBKR data: %s", exc)
+        raise typer.Exit(code=1) from exc
+    except typer.BadParameter:
+        raise
+    except Exception as exc:  # pragma: no cover - surfaces detailed error to user
+        logger.error(f"Model training failed: {exc}")
+        raise typer.Exit(code=1) from exc
+    finally:
+        if hasattr(source, "close") and callable(source.close):
+            with suppress(Exception):
+                source.close()
+
+    logger.info("Model artifact stored at %s", artifact_path)
+    predictions_path = artifact_path.parent / f"{target_symbol}_predictions.csv"
+    if predictions_path.exists():
+        logger.info("Predictions saved to %s", predictions_path)
+    else:  # pragma: no cover - defensive logging
+        logger.warning("Prediction CSV not found at expected path: %s", predictions_path)
 
 
 if __name__ == "__main__":

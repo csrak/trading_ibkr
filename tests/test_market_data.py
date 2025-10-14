@@ -1,4 +1,4 @@
-'"""Tests for market data abstractions and caching."""'
+"""Tests for market data abstractions and caching."""
 
 from __future__ import annotations
 

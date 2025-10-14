@@ -52,6 +52,28 @@ class IBKRConfig(BaseSettings):
     # Data paths
     data_dir: Path = Field(default=Path("data"), description="Directory for storing data")
     log_dir: Path = Field(default=Path("logs"), description="Directory for logs")
+    training_cache_dir: Path = Field(
+        default=Path("data/cache"),
+        description="Cache directory for model training datasets",
+    )
+
+    # Training data defaults
+    training_data_source: str = Field(
+        default="yfinance",
+        description="Default data source identifier for training jobs",
+    )
+    training_client_id: int = Field(
+        default=190,
+        description="IBKR client ID used for historical data snapshots during training",
+    )
+    training_max_snapshots: int = Field(
+        default=50,
+        description="Maximum IBKR historical data requests per training session",
+    )
+    training_snapshot_interval: float = Field(
+        default=1.0,
+        description="Minimum seconds between IBKR historical requests during training",
+    )
 
     @field_validator("port")
     @classmethod
@@ -68,6 +90,7 @@ class IBKRConfig(BaseSettings):
         """Create directories after initialization."""
         self.data_dir.mkdir(parents=True, exist_ok=True)
         self.log_dir.mkdir(parents=True, exist_ok=True)
+        self.training_cache_dir.mkdir(parents=True, exist_ok=True)
 
 
 def load_config() -> IBKRConfig:
