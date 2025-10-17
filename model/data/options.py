@@ -9,11 +9,16 @@ import time
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Protocol
+from typing import Any, Callable, Protocol
 
 import pandas as pd
 
-from .constants import OPTION_CHAIN_METADATA_FILENAME, OPTION_CHAIN_SCHEMA_VERSION
+from .constants import (
+    CACHE_STALENESS_WARNING_FRACTION,
+    DEFAULT_CACHE_TTL_SECONDS,
+    OPTION_CHAIN_METADATA_FILENAME,
+    OPTION_CHAIN_SCHEMA_VERSION,
+)
 from .utils import file_lock, write_csv_atomic, write_json_atomic
 
 logger = logging.getLogger(__name__)
@@ -59,9 +64,16 @@ class OptionChainSource(Protocol):
 class OptionChainCacheStore:
     """Filesystem backed cache for option chains."""
 
-    def __init__(self, base_dir: Path, *, max_age_seconds: float | None = None) -> None:
+    def __init__(
+        self,
+        base_dir: Path,
+        *,
+        max_age_seconds: float | None = DEFAULT_CACHE_TTL_SECONDS,
+        warning_handler: Callable[[str, dict[str, object] | None], None] | None = None,
+    ) -> None:
         self._base_dir = Path(base_dir)
         self._max_age_seconds = max_age_seconds
+        self._warning_handler = warning_handler
 
     def load_option_chain(self, request: OptionChainRequest) -> OptionChain | None:
         calls_path, puts_path, metadata_path = self._paths_for_request(request)
@@ -76,6 +88,7 @@ class OptionChainCacheStore:
             return None
         calls = pd.read_csv(calls_path)
         puts = pd.read_csv(puts_path)
+        self._warn_if_stale(metadata_path)
         logger.debug(
             "Loaded cached option chain for %s expiry=%s", request.symbol, request.expiry_label
         )
@@ -123,7 +136,16 @@ class OptionChainCacheStore:
             with metadata_path.open("r", encoding="utf-8") as handle:
                 metadata = json.load(handle)
             stored_at = float(metadata.get("stored_at", 0.0))
+            schema_version = metadata.get("schema_version")
         except (FileNotFoundError, json.JSONDecodeError, ValueError):  # pragma: no cover
+            return True
+        if schema_version != OPTION_CHAIN_SCHEMA_VERSION:
+            logger.debug(
+                "Metadata schema mismatch for %s (found=%s, expected=%s)",
+                metadata_path,
+                schema_version,
+                OPTION_CHAIN_SCHEMA_VERSION,
+            )
             return True
         expired = (time.time() - stored_at) > self._max_age_seconds
         if expired:
@@ -133,6 +155,71 @@ class OptionChainCacheStore:
                 self._max_age_seconds,
             )
         return expired
+
+    def metadata_entries(self) -> list[dict[str, Any]]:
+        entries: list[dict[str, Any]] = []
+        for metadata_path in self._base_dir.glob(f"**/{OPTION_CHAIN_METADATA_FILENAME}"):
+            try:
+                with metadata_path.open("r", encoding="utf-8") as handle:
+                    metadata = json.load(handle)
+            except (FileNotFoundError, json.JSONDecodeError):  # pragma: no cover
+                continue
+            symbol = metadata.get("symbol") or metadata_path.parent.parent.name.upper()
+            expiry = metadata.get("expiry") or metadata_path.parent.name
+            stored_at = metadata.get("stored_at")
+            age = None
+            if isinstance(stored_at, (int, float)):
+                age = max(0.0, time.time() - float(stored_at))
+            entries.append(
+                {
+                    "symbol": symbol,
+                    "expiry": expiry,
+                    "schema_version": metadata.get("schema_version"),
+                    "age_seconds": age,
+                    "path": metadata_path,
+                }
+            )
+        entries.sort(key=lambda item: (item.get("symbol") or "", item.get("expiry") or ""))
+        return entries
+
+    @property
+    def max_age_seconds(self) -> float | None:
+        return self._max_age_seconds
+
+    def _warn_if_stale(self, metadata_path: Path) -> None:
+        if self._max_age_seconds is None:
+            return
+        age = self._age_seconds(metadata_path)
+        if age is None:
+            return
+        if age >= self._max_age_seconds * CACHE_STALENESS_WARNING_FRACTION:
+            logger.warning(
+                "Option chain cache at %s nearing TTL (age=%.0fs ttl=%.0fs)",
+                metadata_path.parent,
+                age,
+                self._max_age_seconds,
+            )
+            if self._warning_handler is not None:
+                self._warning_handler(
+                    "Option chain cache entry nearing TTL",
+                    {
+                        "path": str(metadata_path.parent),
+                        "age_seconds": age,
+                        "ttl_seconds": self._max_age_seconds,
+                    },
+                )
+
+    @staticmethod
+    def _age_seconds(metadata_path: Path) -> float | None:
+        try:
+            with metadata_path.open("r", encoding="utf-8") as handle:
+                payload = json.load(handle)
+        except (FileNotFoundError, json.JSONDecodeError):  # pragma: no cover
+            return None
+        stored_at = payload.get("stored_at")
+        if not isinstance(stored_at, (int, float)):
+            return None
+        return max(0.0, time.time() - float(stored_at))
 
 
 class OptionChainClient:

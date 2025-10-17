@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import os
+import time
 from datetime import UTC, datetime
 from pathlib import Path
 
 import pandas as pd
 import pytest
+
 from model.data.cache_store import FileCacheStore
 from model.data.client import MarketDataClient
 from model.data.market_data import MarketDataSource, PriceBarRequest
@@ -88,3 +91,20 @@ def test_yfinance_source_normalizes_columns(monkeypatch: pytest.MonkeyPatch) -> 
     assert "adj_close_goog" in frame.columns
     assert "volume_goog" in frame.columns
     assert not frame.empty
+
+
+def test_file_cache_store_respects_ttl(tmp_path: Path) -> None:
+    cache = FileCacheStore(tmp_path, ttl_seconds=60)
+    request = PriceBarRequest(
+        symbol="AAPL",
+        start=datetime(2024, 1, 1, tzinfo=UTC),
+        end=datetime(2024, 1, 2, tzinfo=UTC),
+    )
+    frame = sample_frame()
+    cached_path = cache.store_price_bars(request, frame)
+
+    old_time = time.time() - 3600
+    os.utime(cached_path, (old_time, old_time))
+
+    expired = cache.load_price_bars(request)
+    assert expired is None

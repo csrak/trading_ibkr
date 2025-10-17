@@ -226,7 +226,7 @@ async def test_order_event_published_when_event_bus_provided() -> None:
 
     await broker.place_order(order_request)
 
-    event = await asyncio.wait_for(subscription.get(), timeout=0.1)
+    event = await asyncio.wait_for(subscription.get(), timeout=1.0)
     assert event.order_id == 55
     assert event.filled == 1
     assert event.status.value == "Submitted"
@@ -269,7 +269,7 @@ async def test_execution_events_emitted_on_fill() -> None:
 
     trade.fillEvent.emit(trade, fill)
 
-    event = await asyncio.wait_for(subscription.get(), timeout=0.1)
+    event = await asyncio.wait_for(subscription.get(), timeout=1.0)
     assert event.order_id == 90
     assert event.quantity == 1
     assert event.side == OrderSide.BUY

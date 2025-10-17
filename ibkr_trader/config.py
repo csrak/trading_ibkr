@@ -74,6 +74,14 @@ class IBKRConfig(BaseSettings):
         default=1.0,
         description="Minimum seconds between IBKR historical requests during training",
     )
+    training_price_cache_ttl: float | None = Field(
+        default=3600.0,
+        description="TTL in seconds for cached price bars (None disables TTL)",
+    )
+    training_option_cache_ttl: float | None = Field(
+        default=3600.0,
+        description="TTL in seconds for cached option chains (None disables TTL)",
+    )
 
     @field_validator("port")
     @classmethod

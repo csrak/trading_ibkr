@@ -3,17 +3,20 @@
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
+from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
+import json
 
 import pandas as pd
 import pytest
-from model.data.options import OptionChain
 from typer.testing import CliRunner
 
 from ibkr_trader import cli
 from ibkr_trader.config import IBKRConfig, TradingMode
+from ibkr_trader.constants import DEFAULT_PORTFOLIO_SNAPSHOT
 from ibkr_trader.models import OrderRequest, OrderResult, OrderStatus
+from model.data.options import OptionChain, OptionChainCacheStore, OptionChainRequest
 
 runner = CliRunner()
 
@@ -253,6 +256,7 @@ def test_train_model_cli_uses_data_client(monkeypatch: pytest.MonkeyPatch, tmp_p
         max_snapshots: int,
         snapshot_interval: float,
         client_id: int,
+        telemetry: object | None = None,
     ) -> tuple[object, DummySource]:
         captured_create.update(
             {
@@ -345,6 +349,7 @@ def test_train_model_cli_allows_ibkr_overrides(
         max_snapshots: int,
         snapshot_interval: float,
         client_id: int,
+        telemetry: object | None = None,
     ) -> tuple[object, DummySource]:
         create_calls.update(
             {
@@ -467,6 +472,7 @@ def test_cache_option_chain_cli_invokes_client(
         max_snapshots: int,
         snapshot_interval: float,
         client_id: int,
+        telemetry: object | None = None,
     ) -> tuple[DummyOptionClient, DummySource]:
         captured_create.update(
             {
@@ -503,6 +509,41 @@ def test_cache_option_chain_cli_invokes_client(
     assert captured_create["snapshot_interval"] == config.training_snapshot_interval
     assert captured_create["client_id"] == config.training_client_id
     assert source_closed["value"] is True
+
+
+def test_diagnostics_command(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    config = IBKRConfig(trading_mode=TradingMode.PAPER)
+    config.training_cache_dir = tmp_path / "cache"
+    monkeypatch.setattr(cli, "load_config", lambda: config)
+    monkeypatch.setattr(cli, "setup_logging", lambda *_args, **_kwargs: None)
+
+    class DummyIBKRSource:
+        def __init__(
+            self,
+            *_: object,
+            max_snapshots_per_session: int = 0,
+            **__: object,
+        ) -> None:
+            self._limit = max_snapshots_per_session or 1
+
+        @property
+        def rate_limit_usage(self) -> tuple[int, int]:
+            return (5, self._limit)
+
+    monkeypatch.setattr(cli, "IBKRMarketDataSource", DummyIBKRSource)
+
+    option_cache_dir = config.training_cache_dir / "option_chains"
+    cache = OptionChainCacheStore(option_cache_dir)
+    request = OptionChainRequest(symbol="AAPL", expiry=datetime(2024, 1, 19, tzinfo=UTC))
+    calls = pd.DataFrame({"strike": [150.0], "right": ["C"], "bid": [1.2], "ask": [1.4]})
+    puts = pd.DataFrame({"strike": [150.0], "right": ["P"], "bid": [1.1], "ask": [1.3]})
+    cache.store_option_chain(request, OptionChain(calls=calls, puts=puts))
+
+    result = runner.invoke(cli.app, ["diagnostics", "--show-metadata"])
+
+    assert result.exit_code == 0, result.stdout
+    assert "IBKR rate limit usage" in result.stdout
+    assert "AAPL" in result.stdout
 
 
 def test_paper_quick_lists_presets() -> None:
@@ -552,3 +593,46 @@ def test_paper_quick_unknown_preset(monkeypatch: pytest.MonkeyPatch) -> None:
     )
 
     assert result.exit_code != 0
+
+
+def test_session_status_outputs_snapshot_and_telemetry(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    data_dir = tmp_path / "data"
+    log_dir = tmp_path / "logs"
+    config = IBKRConfig(data_dir=data_dir, log_dir=log_dir)
+    monkeypatch.setattr(cli, "load_config", lambda: config)
+    monkeypatch.setattr(cli, "setup_logging", lambda *_args, **_kwargs: None)
+
+    snapshot_path = config.data_dir / DEFAULT_PORTFOLIO_SNAPSHOT.name
+    snapshot_path.write_text(
+        json.dumps(
+            {
+                "net_liquidation": "12345",
+                "total_cash": "6789",
+                "buying_power": "5555",
+                "positions": {"AAPL": {"quantity": 10}},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    telemetry_file = config.log_dir / "telemetry.jsonl"
+    telemetry_file.write_text(
+        json.dumps(
+            {
+                "timestamp": "2024-01-01T00:00:00Z",
+                "level": "WARNING",
+                "message": "cache nearing ttl",
+                "context": {"path": "cache.csv"},
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    result = runner.invoke(cli.app, ["session-status"])
+
+    assert result.exit_code == 0, result.stdout
+    assert "Net Liquidation: 12345" in result.stdout
+    assert "cache nearing ttl" in result.stdout

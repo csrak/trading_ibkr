@@ -31,7 +31,19 @@ We now have two parallel data stacks:
 | Option Chains    | `YFinanceOptionChainSource`     | `cache-option-chain`             | `data/cache/option_chains/...` |
 | Option Chains (IBKR) | `IBKROptionChainSource`     | `cache-option-chain`             | `data/cache/option_chains/...` |
 
-All caches are plain CSV files so you can open them in a spreadsheet or notebook without special tooling.
+All caches are plain CSV files so you can open them in a spreadsheet or notebook without special tooling. Option-chain caches also include a small `metadata.json` manifest that records the schema version and the time the snapshot was written.
+
+### 2.1 Cache Schema & TTL Overview
+
+| Dataset                     | Schema Version | Default TTL | Notes |
+|-----------------------------|----------------|-------------|-------|
+| Price bars (`FileCacheStore`)| `1.0` (implicit) | `IBKR_TRAINING_PRICE_CACHE_TTL` (default 1 hour) | Files are hash-named and expire automatically once their TTL elapses. |
+| Option chains (`OptionChainCacheStore`) | `1.0` | `IBKR_TRAINING_OPTION_CACHE_TTL` (default 1 hour) | Metadata file stores symbol, expiry, schema version, and write timestamp. |
+| Order books (`OrderBookStore`) | `1.0` | N/A | Schema version column is appended to each row. |
+| Trades (`TradeStore`) | `1.0` | N/A | Schema version column is appended to each row. |
+| Option surfaces (`OptionSurfaceStore`) | `1.0` | N/A | Schema version column is appended to each row. |
+
+Use `ibkr-trader diagnostics` (described later) to inspect TTL settings and view cached option-chain metadata from the CLI.
 
 ---
 
@@ -44,6 +56,8 @@ All caches are plain CSV files so you can open them in a spreadsheet or notebook
 - `training_client_id`: dedicated IBKR client ID for historical data snapshots.
 - `training_max_snapshots`: quota for requests per job (protects you from overusing IBKR snapshots).
 - `training_snapshot_interval`: minimum seconds between IBKR historical calls.
+- `training_price_cache_ttl`: TTL (seconds) for cached price bars (use `0` or omit to disable).
+- `training_option_cache_ttl`: TTL (seconds) for cached option chains (use `0` or omit to disable).
 
 Update these via environment variables (e.g., `IBKR_TRAINING_DATA_SOURCE=ibkr`) or by editing `.env`.
 
@@ -163,6 +177,8 @@ ls data/cache/option_chains/AAPL
 - **Rotate client IDs**: IBKR limits snapshots per client ID; using a dedicated training ID avoids conflicts with live trading sessions.
 - **Track snapshot usage**: if you hit `SnapshotLimitError`, lower `--max-snapshots` or raise `--snapshot-interval`.
 - **Document experiments**: write down which data source and cache settings produced a given artifact (include CLI flags in your logs).
+- **Run diagnostics**: `ibkr-trader diagnostics --show-metadata` prints rate-limit settings, cache TTLs, and per-expiry option-chain metadata so you can quickly spot stale entries.
+- **Monitor telemetry**: `ibkr-trader monitor-telemetry --tail 20 --follow` streams live cache/rate-limit warnings written by the platform.
 
 ---
 

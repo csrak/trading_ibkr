@@ -1,7 +1,10 @@
 """CLI entry point for IBKR Personal Trader."""
 
 import asyncio
+import json
 import sys
+import time
+from collections import deque
 from contextlib import AbstractAsyncContextManager, suppress
 from datetime import UTC, datetime
 from decimal import Decimal, InvalidOperation
@@ -10,18 +13,6 @@ from pathlib import Path
 import pandas as pd
 import typer
 from loguru import logger
-from model.data import (
-    FileCacheStore,
-    IBKRMarketDataSource,
-    IBKROptionChainSource,
-    MarketDataClient,
-    OptionChainCacheStore,
-    OptionChainClient,
-    OptionChainRequest,
-    SnapshotLimitError,
-    YFinanceMarketDataSource,
-    YFinanceOptionChainSource,
-)
 
 from ibkr_trader.backtest.engine import BacktestEngine
 from ibkr_trader.broker import IBKRBroker
@@ -33,7 +24,13 @@ from ibkr_trader.constants import (
     MOCK_PRICE_SLEEP_SECONDS,
     MOCK_PRICE_VARIATION_MODULO,
 )
-from ibkr_trader.events import EventBus, EventTopic, ExecutionEvent, OrderStatusEvent
+from ibkr_trader.events import (
+    DiagnosticEvent,
+    EventBus,
+    EventTopic,
+    ExecutionEvent,
+    OrderStatusEvent,
+)
 from ibkr_trader.market_data import MarketDataService, SubscriptionRequest
 from ibkr_trader.models import OrderRequest, OrderSide, OrderType, SymbolContract
 from ibkr_trader.portfolio import PortfolioState, RiskGuard
@@ -45,6 +42,19 @@ from ibkr_trader.strategy import (
     IndustryModelStrategy,
     SimpleMovingAverageStrategy,
     SMAConfig,
+)
+from ibkr_trader.telemetry import TelemetryReporter, build_telemetry_reporter
+from model.data import (
+    FileCacheStore,
+    IBKRMarketDataSource,
+    IBKROptionChainSource,
+    MarketDataClient,
+    OptionChainCacheStore,
+    OptionChainClient,
+    OptionChainRequest,
+    SnapshotLimitError,
+    YFinanceMarketDataSource,
+    YFinanceOptionChainSource,
 )
 from model.training.industry_model import train_linear_industry_model
 
@@ -92,11 +102,17 @@ def create_market_data_client(
     max_snapshots: int,
     snapshot_interval: float,
     client_id: int,
+    telemetry: TelemetryReporter | None = None,
 ) -> tuple[MarketDataClient, object]:
     """Instantiate a market data client for training workflows."""
 
     cache_dir.mkdir(parents=True, exist_ok=True)
-    cache = FileCacheStore(cache_dir)
+    warning = telemetry.warning if telemetry is not None else None
+    cache = FileCacheStore(
+        cache_dir,
+        ttl_seconds=config.training_price_cache_ttl,
+        warning_handler=warning,
+    )
     normalized = source_name.strip().lower()
 
     if normalized == "yfinance":
@@ -108,6 +124,7 @@ def create_market_data_client(
             client_id=client_id,
             max_snapshots_per_session=max_snapshots,
             min_request_interval_seconds=snapshot_interval,
+            warning_handler=warning,
         )
     else:
         raise typer.BadParameter(
@@ -127,11 +144,17 @@ def create_option_chain_client(
     max_snapshots: int,
     snapshot_interval: float,
     client_id: int,
+    telemetry: TelemetryReporter | None = None,
 ) -> tuple[OptionChainClient, object]:
     """Instantiate an option chain client for caching workflows."""
 
     cache_dir.mkdir(parents=True, exist_ok=True)
-    cache = OptionChainCacheStore(cache_dir)
+    warning = telemetry.warning if telemetry is not None else None
+    cache = OptionChainCacheStore(
+        cache_dir,
+        max_age_seconds=config.training_option_cache_ttl,
+        warning_handler=warning,
+    )
     normalized = source_name.strip().lower()
 
     if normalized == "yfinance":
@@ -143,6 +166,7 @@ def create_option_chain_client(
             client_id=client_id,
             max_snapshots_per_session=max_snapshots,
             min_request_interval_seconds=snapshot_interval,
+            warning_handler=warning,
         )
     else:
         raise typer.BadParameter(
@@ -152,6 +176,216 @@ def create_option_chain_client(
 
     client = OptionChainClient(source=source, cache=cache)
     return client, source
+
+
+def _format_seconds(value: float | None) -> str:
+    if value is None:
+        return "disabled"
+    if value < 1:
+        return f"{value * 1_000:.0f} ms"
+    if value < 60:
+        return f"{value:.0f} s"
+    minutes, seconds = divmod(int(value), 60)
+    hours, minutes = divmod(minutes, 60)
+    parts = []
+    if hours:
+        parts.append(f"{hours}h")
+    if minutes:
+        parts.append(f"{minutes}m")
+    if seconds:
+        parts.append(f"{seconds}s")
+    return " ".join(parts) or "0s"
+
+
+def _format_telemetry_line(line: str) -> str:
+    payload = line.strip()
+    if not payload:
+        return ""
+    try:
+        record = json.loads(payload)
+    except json.JSONDecodeError:
+        return payload
+
+    timestamp = record.get("timestamp", "")
+    level = record.get("level", "")
+    message = record.get("message", "")
+    context = record.get("context")
+    if context:
+        context_blob = json.dumps(context, separators=(",", ":"), ensure_ascii=False)
+        return f"{timestamp} {level}: {message} {context_blob}"
+    return f"{timestamp} {level}: {message}"
+
+
+def _load_portfolio_snapshot(path: Path) -> dict[str, object] | None:
+    if not path.exists():
+        return None
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except Exception:  # pragma: no cover - defensive
+        return None
+
+
+def _tail_telemetry_entries(telemetry_file: Path, tail: int) -> list[str]:
+    if not telemetry_file.exists():
+        return []
+    with telemetry_file.open("r", encoding="utf-8") as handle:
+        lines = list(deque(handle, maxlen=tail if tail > 0 else None))
+    formatted: list[str] = []
+    for line in lines:
+        formatted_line = _format_telemetry_line(line)
+        if formatted_line:
+            formatted.append(formatted_line)
+    return formatted
+
+
+@app.command()
+def diagnostics(
+    show_metadata: bool = typer.Option(
+        False,
+        "--show-metadata",
+        help="Display individual option chain cache entries.",
+    ),
+    verbose: bool = typer.Option(False, "--verbose", "-v", help="Enable verbose logging"),
+) -> None:
+    """Display cache TTL and rate limiter diagnostics."""
+
+    config = load_config()
+    setup_logging(config.log_dir, verbose)
+
+    price_cache_dir = config.training_cache_dir
+    price_cache_dir.mkdir(parents=True, exist_ok=True)
+    price_cache = FileCacheStore(price_cache_dir)
+    option_cache_dir = config.training_cache_dir / "option_chains"
+    option_cache_dir.mkdir(parents=True, exist_ok=True)
+    option_cache = OptionChainCacheStore(option_cache_dir)
+
+    ib_source = IBKRMarketDataSource(
+        max_snapshots_per_session=config.training_max_snapshots,
+        min_request_interval_seconds=config.training_snapshot_interval,
+    )
+    used, limit = ib_source.rate_limit_usage
+
+    typer.echo("=== Market Data Diagnostics ===")
+    typer.echo(
+        f"Price cache directory: {price_cache_dir} (ttl={_format_seconds(price_cache.ttl_seconds)})"
+    )
+    typer.echo(
+        "Option chain cache directory: "
+        f"{option_cache_dir} (ttl={_format_seconds(option_cache.max_age_seconds)})"
+    )
+    typer.echo(f"IBKR rate limit usage: {used}/{limit} requests this session")
+
+    if show_metadata:
+        entries = option_cache.metadata_entries()
+        if not entries:
+            typer.echo("No option chain metadata entries found.")
+        else:
+            typer.echo("\nOption chain cache entries:")
+            for entry in entries:
+                age_str = (
+                    _format_seconds(entry["age_seconds"])
+                    if entry.get("age_seconds") is not None
+                    else "n/a"
+                )
+                schema = entry.get("schema_version")
+                typer.echo(
+                    f"  {entry['symbol']} {entry['expiry']} | age={age_str} | schema={schema}"
+                )
+
+
+@app.command("session-status")
+def session_status(
+    tail: int = typer.Option(5, "--tail", min=0, help="Telemetry entries to display"),
+    verbose: bool = typer.Option(False, "--verbose", "-v", help="Enable verbose logging"),
+) -> None:
+    """Show current portfolio snapshot and recent telemetry events."""
+
+    config = load_config()
+    setup_logging(config.log_dir, verbose)
+
+    snapshot_path = config.data_dir / DEFAULT_PORTFOLIO_SNAPSHOT.name
+    telemetry_file = config.log_dir / "telemetry.jsonl"
+
+    typer.echo("=== Session Status ===")
+    typer.echo(f"Snapshot file: {snapshot_path}")
+
+    snapshot = _load_portfolio_snapshot(snapshot_path)
+    if snapshot is None:
+        typer.echo("Portfolio snapshot not available.")
+    else:
+        net_liq = snapshot.get("net_liquidation")
+        cash = snapshot.get("total_cash")
+        buying_power = snapshot.get("buying_power")
+        typer.echo(
+            f"Net Liquidation: {net_liq} | Cash: {cash} | Buying Power: {buying_power}"
+        )
+        positions = snapshot.get("positions") or {}
+        if positions:
+            typer.echo("Positions:")
+            for symbol, details in positions.items():
+                qty = details.get("quantity") if isinstance(details, dict) else details
+                typer.echo(f"  {symbol}: {qty}")
+        else:
+            typer.echo("No open positions recorded.")
+
+    typer.echo("")
+    typer.echo(f"Telemetry file: {telemetry_file}")
+    entries = _tail_telemetry_entries(telemetry_file, tail)
+    if not entries:
+        typer.echo("No telemetry entries found.")
+    else:
+        typer.echo("Recent telemetry:")
+        for line in entries:
+            typer.echo(f"  {line}")
+
+
+@app.command("monitor-telemetry")
+def monitor_telemetry(
+    tail: int = typer.Option(
+        20,
+        "--tail",
+        min=0,
+        help="Number of most recent telemetry entries to display (0 = show all)",
+    ),
+    follow: bool = typer.Option(
+        False,
+        "--follow/--no-follow",
+        help="Continue watching for new telemetry entries",
+    ),
+    verbose: bool = typer.Option(False, "--verbose", "-v", help="Enable verbose logging"),
+) -> None:
+    """Print telemetry records collected by the platform."""
+
+    config = load_config()
+    setup_logging(config.log_dir, verbose)
+
+    telemetry_file = config.log_dir / "telemetry.jsonl"
+    if not telemetry_file.exists():
+        typer.echo(f"No telemetry file found at {telemetry_file}")
+        raise typer.Exit()
+
+    typer.echo(f"Telemetry file: {telemetry_file}")
+
+    try:
+        entries = _tail_telemetry_entries(telemetry_file, tail)
+        for entry in entries:
+            typer.echo(entry)
+
+        if not follow:
+            return
+
+        with telemetry_file.open("r", encoding="utf-8") as handle:
+            handle.seek(0, 2)
+            while True:
+                line = handle.readline()
+                if not line:
+                    time.sleep(0.5)
+                    continue
+                formatted = _format_telemetry_line(line)
+                if formatted:
+                    typer.echo(formatted)
+    except KeyboardInterrupt:  # pragma: no cover - user initiated
+        typer.echo("Stopping telemetry monitor.")
 
 
 @app.command()
@@ -212,6 +446,16 @@ def run(
     logger.info(f"Port: {config.port}")
     logger.info(f"Symbols: {', '.join(symbols)}")
     logger.info("=" * 70)
+    logger.info(
+        "Cache TTLs -> price=%s option=%s",
+        _format_seconds(config.training_price_cache_ttl),
+        _format_seconds(config.training_option_cache_ttl),
+    )
+    logger.info(
+        "IBKR snapshot limits -> max=%d interval=%.2fs",
+        config.training_max_snapshots,
+        config.training_snapshot_interval,
+    )
 
     # Initialize safety guard
     guard = LiveTradingGuard(config=config, live_flag_enabled=live)
@@ -277,6 +521,18 @@ async def run_strategy(
     """
     # Initialize broker
     event_bus = EventBus()
+    telemetry = build_telemetry_reporter(
+        event_bus=event_bus,
+        file_path=config.log_dir / "telemetry.jsonl",
+    )
+    telemetry.info(
+        "Telemetry configured for strategy run",
+        context={
+            "symbols": symbols,
+            "price_cache_ttl": config.training_price_cache_ttl,
+            "option_cache_ttl": config.training_option_cache_ttl,
+        },
+    )
     market_data = MarketDataService(event_bus=event_bus)
     snapshot_path = config.data_dir / DEFAULT_PORTFOLIO_SNAPSHOT.name
     portfolio = PortfolioState(
@@ -296,6 +552,7 @@ async def run_strategy(
     strategy: SimpleMovingAverageStrategy | None = None
     order_task: asyncio.Task[None] | None = None
     execution_task: asyncio.Task[None] | None = None
+    diagnostic_task: asyncio.Task[None] | None = None
     stream_contexts: list[AbstractAsyncContextManager[None]] = []
 
     try:
@@ -360,6 +617,22 @@ async def run_strategy(
 
         execution_task = asyncio.create_task(execution_listener())
 
+        async def diagnostic_listener() -> None:
+            subscription = event_bus.subscribe(EventTopic.DIAGNOSTIC)
+            try:
+                async for event in subscription:
+                    if isinstance(event, DiagnosticEvent):
+                        logger.log(
+                            event.level,
+                            "[diagnostic] %s %s",
+                            event.message,
+                            event.context or "",
+                        )
+            except asyncio.CancelledError:
+                raise
+
+        diagnostic_task = asyncio.create_task(diagnostic_listener())
+
         logger.info(f"Strategy initialized: {strategy_config.name}")
         logger.info(f"Fast SMA: {fast_period}, Slow SMA: {slow_period}")
         logger.info("Starting price monitoring... (Press Ctrl+C to stop)")
@@ -395,6 +668,10 @@ async def run_strategy(
             execution_task.cancel()
             with suppress(asyncio.CancelledError):
                 await execution_task
+        if diagnostic_task is not None:
+            diagnostic_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await diagnostic_task
         await broker.disconnect()
         logger.info("Strategy stopped")
 
@@ -905,6 +1182,10 @@ def train_model_command(
 
     artifact_dir.mkdir(parents=True, exist_ok=True)
 
+    telemetry = build_telemetry_reporter(
+        file_path=config.log_dir / "telemetry.jsonl",
+    )
+
     resolved_data_source = data_source or config.training_data_source
     resolved_cache_dir = cache_dir or config.training_cache_dir
     resolved_max_snapshots = (
@@ -926,6 +1207,7 @@ def train_model_command(
             max_snapshots=resolved_max_snapshots,
             snapshot_interval=resolved_snapshot_interval,
             client_id=resolved_client_id,
+            telemetry=telemetry,
         )
 
         artifact_path = train_linear_industry_model(
@@ -1013,6 +1295,10 @@ def cache_option_chain_command(
     config = load_config()
     setup_logging(config.log_dir, verbose)
 
+    telemetry = build_telemetry_reporter(
+        file_path=config.log_dir / "telemetry.jsonl",
+    )
+
     resolved_data_source = data_source or config.training_data_source
     base_cache_dir = cache_dir or (config.training_cache_dir / "option_chains")
     resolved_max_snapshots = (
@@ -1034,6 +1320,7 @@ def cache_option_chain_command(
             max_snapshots=resolved_max_snapshots,
             snapshot_interval=resolved_snapshot_interval,
             client_id=resolved_client_id,
+            telemetry=telemetry,
         )
 
         chain = client.get_option_chain(

@@ -18,6 +18,7 @@ from .constants import (
     IBKR_HISTORICAL_DATA_USE_RTH,
     IBKR_HISTORICAL_DATA_WHAT_TO_SHOW,
     IBKR_HISTORICAL_DATE_FORMAT,
+    RATE_LIMIT_WARNING_THRESHOLD,
 )
 from .market_data import PriceBarRequest
 from .models import OptionRight
@@ -150,6 +151,7 @@ class IBKRMarketDataSource:
         contract_factory: Callable[[str], Contract] = _default_contract_factory,
         max_snapshots_per_session: int = 60,
         min_request_interval_seconds: float = 1.0,
+        warning_handler: Callable[[str, dict[str, object] | None], None] | None = None,
     ) -> None:
         self._ib = ib or IB()
         self._contract_factory = contract_factory
@@ -157,10 +159,12 @@ class IBKRMarketDataSource:
             max_calls=max_snapshots_per_session,
             min_interval=min_request_interval_seconds,
         )
+        self._warning_handler = warning_handler
 
     def get_price_bars(self, request: PriceBarRequest) -> pd.DataFrame:
         _ensure_connected(self._ib, symbol=request.symbol)
         self._limiter.track(symbol=request.symbol, context=f"historical:{request.interval}")
+        self._warn_if_rate_limit_near(symbol=request.symbol)
 
         contract = self._contract_factory(request.symbol)
         duration = _duration_string(request)
@@ -245,6 +249,30 @@ class IBKRMarketDataSource:
     def reset_rate_limiter(self) -> None:
         self._limiter.reset()
 
+    def _warn_if_rate_limit_near(self, symbol: str | None) -> None:
+        used, limit = self.rate_limit_usage
+        if limit <= 0:
+            return
+        ratio = used / limit
+        if ratio >= RATE_LIMIT_WARNING_THRESHOLD:
+            logger.warning(
+                "IBKR historical data usage approaching limit (%s: %d/%d = %.0f%%)",
+                symbol or "N/A",
+                used,
+                limit,
+                ratio * 100,
+            )
+            if self._warning_handler is not None:
+                self._warning_handler(
+                    "IBKR historical data usage approaching limit",
+                    {
+                        "symbol": symbol,
+                        "used": used,
+                        "limit": limit,
+                        "ratio": ratio,
+                    },
+                )
+
 
 @dataclass(slots=True)
 class _OptionTicker:
@@ -284,6 +312,7 @@ class IBKROptionChainSource:
         max_contracts_per_side: int = 20,
         max_snapshots_per_session: int = 100,
         min_request_interval_seconds: float = 1.0,
+        warning_handler: Callable[[str, dict[str, object] | None], None] | None = None,
     ) -> None:
         self._ib = ib or IB()
         self._underlying_factory = underlying_factory
@@ -293,11 +322,13 @@ class IBKROptionChainSource:
             max_calls=max_snapshots_per_session,
             min_interval=min_request_interval_seconds,
         )
+        self._warning_handler = warning_handler
 
     def get_option_chain(self, request: OptionChainRequest) -> OptionChain:
         _ensure_connected(self._ib, symbol=request.symbol)
         expiry = request.expiry.strftime("%Y%m%d")
         self._limiter.track(symbol=request.symbol, context=f"option_chain:{expiry}")
+        self._warn_if_rate_limit_near(request.symbol)
 
         underlying = self._underlying_factory(request.symbol)
 
@@ -399,3 +430,33 @@ class IBKROptionChainSource:
             len(puts_frame),
         )
         return OptionChain(calls=calls_frame, puts=puts_frame)
+
+    def rate_limit_usage(self) -> tuple[int, int]:
+        return self._limiter.calls_used, self._limiter.call_limit
+
+    def reset_rate_limiter(self) -> None:
+        self._limiter.reset()
+
+    def _warn_if_rate_limit_near(self, symbol: str | None) -> None:
+        used, limit = self.rate_limit_usage()
+        if limit <= 0:
+            return
+        ratio = used / limit
+        if ratio >= RATE_LIMIT_WARNING_THRESHOLD:
+            logger.warning(
+                "IBKR option chain requests approaching limit (%s: %d/%d = %.0f%%)",
+                symbol or "N/A",
+                used,
+                limit,
+                ratio * 100,
+            )
+            if self._warning_handler is not None:
+                self._warning_handler(
+                    "IBKR option chain usage approaching limit",
+                    {
+                        "symbol": symbol,
+                        "used": used,
+                        "limit": limit,
+                        "ratio": ratio,
+                    },
+                )

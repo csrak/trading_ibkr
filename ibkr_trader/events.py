@@ -20,6 +20,7 @@ class EventTopic(str, Enum):
     MARKET_DATA = "market_data"
     ACCOUNT = "account"
     EXECUTION = "execution"
+    DIAGNOSTIC = "diagnostic"
 
 
 @dataclass(frozen=True, slots=True)
@@ -56,6 +57,16 @@ class ExecutionEvent:
     price: Decimal
     commission: Decimal
     timestamp: datetime
+
+
+@dataclass(frozen=True, slots=True)
+class DiagnosticEvent:
+    """Telemetry message for instrumentation warnings/info."""
+
+    level: str
+    message: str
+    timestamp: datetime
+    context: dict[str, object] | None = None
 
 
 class EventSubscription:
