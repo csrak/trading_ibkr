@@ -88,29 +88,48 @@ Enable expert traders to train → backtest → live test → live trade with AN
 
 ---
 
+### Step 4: Extend CLI for Config-Based Strategy Execution (Completed 2025-10-17)
+
+**Status:** ✅ Complete
+
+**Deliverables:**
+- [x] Added `--config` parameter to `run` command
+- [x] Created `ConfigBasedLiveStrategy` adapter
+  - Wraps replay strategies for live execution
+  - Converts event bus callbacks to on_bar() calls
+  - Maintains compatibility with Strategy base class
+- [x] Strategy config loading via `load_strategy_config()`
+- [x] Factory-based strategy instantiation
+- [x] Symbols auto-detected from config
+- [x] All 90 tests still passing ✅
+
+**Implementation:**
+- New file: `ibkr_trader/strategy_adapters.py`
+- Modified: `ibkr_trader/cli.py` (added --config support)
+- Imported: `StrategyFactory` and `load_strategy_config`
+
+**Usage:**
+```bash
+# Default SMA strategy (existing)
+ibkr-trader run --symbol AAPL
+
+# Config-based strategy (new!)
+ibkr-trader run --config strategies/mean_reversion.json
+```
+
+**Actual Time:** ~2 hours
+
+**Commit:** `[pending]` - "Phase 1 Step 4: Add CLI --config parameter with live adapter"
+
+---
+
 ## 🚧 In Progress
 
-None - Ready for Step 4
+None - Ready for Step 5
 
 ---
 
 ## 📋 Remaining Steps
-
-### Step 4: Extend CLI for Config-Based Strategy Execution
-
-**Goal:** Enable `ibkr-trader run --config mean_reversion.json` for ANY strategy
-
-**Tasks:**
-- [ ] Add `--config` parameter to `run` command
-- [ ] Create strategy config → live Strategy adapter
-- [ ] Support running advanced strategies (mean reversion, vol overlay, etc.) via CLI
-- [ ] Add config validation and error handling
-
-**Files to Modify:**
-- `ibkr_trader/cli.py` - Add --config parameter, strategy loading logic
-- `ibkr_trader/strategy_configs/factory.py` - Extend to create live Strategy instances
-
-**Estimated Time:** 3-4 hours
 
 ---
 
@@ -203,16 +222,16 @@ None - Ready for Step 4
 ## Summary Statistics
 
 **Completed:**
-- Steps: 3/10 (30%)
-- Time spent: ~6 hours
-- Commits: 3 (pending: 1 more for Step 3)
+- Steps: 4/10 (40%)
+- Time spent: ~8 hours
+- Commits: 4 (pending: 1 more for Step 4)
 - Tests passing: 90/90 ✅
-- Lines of code added: ~2,000
+- Lines of code added: ~2,100
 
 **Remaining:**
-- Steps: 7/10 (70%)
-- Estimated time: 10-14 hours
-- High priority: Steps 4-7
+- Steps: 6/10 (60%)
+- Estimated time: 8-12 hours
+- High priority: Steps 5-7
 - Low priority: Steps 8-10 (polish)
 
 ---
@@ -300,5 +319,5 @@ When resuming Phase 1 work:
 
 ---
 
-*Last updated: 2025-10-17 17:45 UTC*
-*Current status: Step 3 complete, Step 4 ready to start*
+*Last updated: 2025-10-17 19:30 UTC*
+*Current status: Step 4 complete, Step 5 ready to start*

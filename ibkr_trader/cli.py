@@ -43,6 +43,9 @@ from ibkr_trader.strategy import (
     SimpleMovingAverageStrategy,
     SMAConfig,
 )
+from ibkr_trader.strategy_adapters import ConfigBasedLiveStrategy
+from ibkr_trader.strategy_configs.config import load_strategy_config
+from ibkr_trader.strategy_configs.factory import StrategyFactory
 from ibkr_trader.summary import summarize_run
 from ibkr_trader.telemetry import TelemetryReporter, build_telemetry_reporter
 from model.data import (
@@ -451,6 +454,15 @@ def run(
         "-p",
         help="Position size per trade",
     ),
+    config_path: Path | None = typer.Option(
+        None,
+        "--config",
+        "-c",
+        exists=True,
+        readable=True,
+        resolve_path=True,
+        help="Path to strategy config JSON (overrides default SMA parameters)",
+    ),
     verbose: bool = typer.Option(
         False,
         "--verbose",
@@ -461,6 +473,10 @@ def run(
     """Run the trading strategy.
 
     By default, runs in PAPER TRADING mode (no real money at risk).
+
+    Supports two modes:
+    1. Default SMA strategy with command-line parameters
+    2. Config-based strategy loading with --config (experimental)
 
     To enable live trading, you must:
     1. Set IBKR_TRADING_MODE=live environment variable
@@ -529,6 +545,7 @@ def run(
             fast_period=fast_period,
             slow_period=slow_period,
             position_size=position_size,
+            config_path=config_path,
         )
     )
 
@@ -540,6 +557,7 @@ async def run_strategy(
     fast_period: int,
     slow_period: int,
     position_size: int,
+    config_path: Path | None = None,
 ) -> None:
     """Run the trading strategy asynchronously.
 
@@ -550,6 +568,7 @@ async def run_strategy(
         fast_period: Fast SMA period
         slow_period: Slow SMA period
         position_size: Position size per trade
+        config_path: Optional path to strategy configuration JSON
     """
     # Initialize broker
     event_bus = EventBus()
@@ -563,6 +582,7 @@ async def run_strategy(
             "symbols": symbols,
             "price_cache_ttl": config.training_price_cache_ttl,
             "option_cache_ttl": config.training_option_cache_ttl,
+            "config_based": config_path is not None,
         },
     )
     market_data = MarketDataService(event_bus=event_bus)
@@ -581,7 +601,7 @@ async def run_strategy(
         event_bus=event_bus,
         risk_guard=risk_guard,
     )
-    strategy: SimpleMovingAverageStrategy | None = None
+    strategy: SimpleMovingAverageStrategy | ConfigBasedLiveStrategy | None = None
     order_task: asyncio.Task[None] | None = None
     execution_task: asyncio.Task[None] | None = None
     diagnostic_task: asyncio.Task[None] | None = None
@@ -605,24 +625,58 @@ async def run_strategy(
 
         if not config.use_mock_market_data:
             market_data.attach_ib(broker.ib)
-            for symbol in symbols:
+            # Determine which symbols to subscribe to
+            subscribe_symbols = symbols
+            if config_path is not None:
+                strat_config = load_strategy_config(config_path)
+                subscribe_symbols = [strat_config.symbol]
+
+            for symbol in subscribe_symbols:
                 request = SubscriptionRequest(SymbolContract(symbol=symbol))
                 context = market_data.subscribe(request)
                 await context.__aenter__()
                 stream_contexts.append(context)
 
-        strategy_config = SMAConfig(
-            symbols=symbols,
-            fast_period=fast_period,
-            slow_period=slow_period,
-            position_size=position_size,
-        )
-        strategy = SimpleMovingAverageStrategy(
-            config=strategy_config,
-            broker=broker,
-            event_bus=event_bus,
-            risk_guard=risk_guard,
-        )
+        # Initialize strategy based on config or default SMA
+        if config_path is not None:
+            # Config-based strategy loading
+            strat_config = load_strategy_config(config_path)
+            logger.info(
+                f"Loaded strategy config: {strat_config.name} ({strat_config.strategy_type})"
+            )
+
+            # Create replay strategy instance
+            replay_strategy = StrategyFactory.create(strat_config)
+
+            # Wrap in live adapter
+            strategy = ConfigBasedLiveStrategy(
+                impl=replay_strategy,
+                broker=broker,
+                event_bus=event_bus,
+                symbol=strat_config.symbol,
+            )
+            logger.info(
+                f"Config-based strategy initialized: {strat_config.name} "
+                f"(type={strat_config.strategy_type}, symbol={strat_config.symbol})"
+            )
+        else:
+            # Default SMA strategy
+            strategy_config = SMAConfig(
+                symbols=symbols,
+                fast_period=fast_period,
+                slow_period=slow_period,
+                position_size=position_size,
+            )
+            strategy = SimpleMovingAverageStrategy(
+                config=strategy_config,
+                broker=broker,
+                event_bus=event_bus,
+                risk_guard=risk_guard,
+            )
+            logger.info(
+                f"SMA strategy initialized: fast={fast_period}, slow={slow_period}, "
+                f"size={position_size}"
+            )
 
         await strategy.start()
 
@@ -666,9 +720,8 @@ async def run_strategy(
 
         diagnostic_task = asyncio.create_task(diagnostic_listener())
 
-        logger.info(f"Strategy initialized: {strategy_config.name}")
-        logger.info(f"Fast SMA: {fast_period}, Slow SMA: {slow_period}")
-        logger.info("Starting price monitoring... (Press Ctrl+C to stop)")
+        logger.info("Strategy running - monitoring market data...")
+        logger.info("Press Ctrl+C to stop")
 
         if config.use_mock_market_data:
             counter = 0

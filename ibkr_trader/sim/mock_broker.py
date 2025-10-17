@@ -109,7 +109,8 @@ class MockBroker:
                 return
             state.filled_qty += fill_quantity
             remaining = max(
-                0.0, (state.remaining_qty if state.remaining_qty is not None else 0.0) - fill_quantity
+                0.0,
+                (state.remaining_qty if state.remaining_qty is not None else 0.0) - fill_quantity,
             )
             state.remaining_qty = remaining
             state.avg_price = float(fill_price)
