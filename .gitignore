@@ -57,6 +57,7 @@ dmypy.json
 /model/artifacts/
 /model/artifacts/**
 *.log
+.uv_cache/
 
 # macOS
 .DS_Store
