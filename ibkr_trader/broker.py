@@ -24,6 +24,7 @@ from loguru import logger
 from ibkr_trader.config import IBKRConfig
 from ibkr_trader.events import EventBus, EventTopic, ExecutionEvent, OrderStatusEvent
 from ibkr_trader.models import (
+    BracketOrderRequest,
     OrderRequest,
     OrderResult,
     OrderSide,
@@ -357,6 +358,219 @@ class IBKRBroker:
                 status=result_status,
                 contract=order_request.contract,
                 side=order_request.side,
+                filled=filled_quantity,
+                remaining=remaining_quantity,
+                avg_fill_price=avg_fill_price,
+                timestamp=datetime.now(UTC),
+            )
+        )
+
+        return result
+
+    async def place_bracket_order(self, bracket_request: BracketOrderRequest) -> OrderResult:
+        """Place a bracket order (entry + stop loss + take profit).
+
+        A bracket order consists of three linked orders:
+        1. Parent order (entry) - executed first
+        2. Stop loss order - activated when parent fills
+        3. Take profit order - activated when parent fills
+
+        When either child order fills, the other is automatically cancelled (OCO).
+
+        Args:
+            bracket_request: Bracket order specification
+
+        Returns:
+            OrderResult for the parent order (includes child_order_ids)
+
+        Raises:
+            LiveTradingError: If safety checks fail
+            ValueError: If bracket order validation fails
+        """
+        # Validate bracket order structure
+        parent_req = bracket_request.parent
+        stop_req = bracket_request.stop_loss
+        take_profit_req = bracket_request.take_profit
+
+        # Safety check on parent order
+        self.guard.check_order_safety(
+            symbol=parent_req.contract.symbol,
+            quantity=parent_req.quantity,
+        )
+
+        if self._risk_guard is not None:
+            price_for_risk = (
+                parent_req.expected_price
+                or parent_req.limit_price
+                or parent_req.stop_price
+                or Decimal("0")
+            )
+            await self._risk_guard.validate_order(
+                contract=parent_req.contract,
+                side=parent_req.side,
+                quantity=parent_req.quantity,
+                price=Decimal(price_for_risk),
+            )
+
+        self._ensure_connected()
+
+        # Log bracket order details
+        logger.info(
+            f"Placing bracket order: {parent_req.side.value} {parent_req.quantity} "
+            f"{parent_req.contract.symbol} with stop_loss={stop_req.stop_price} "
+            f"take_profit={take_profit_req.limit_price}"
+        )
+
+        # Qualify contract
+        base_contract = self._create_contract(parent_req.contract)
+        qualified_contracts = await self.ib.qualifyContractsAsync(base_contract)
+        if not qualified_contracts:
+            raise ValueError(f"Unable to qualify contract for symbol {parent_req.contract.symbol}")
+        contract = qualified_contracts[0]
+
+        # Create parent order (transmit=False to group with children)
+        parent_order_req = OrderRequest(
+            contract=parent_req.contract,
+            side=parent_req.side,
+            quantity=parent_req.quantity,
+            order_type=parent_req.order_type,
+            limit_price=parent_req.limit_price,
+            stop_price=parent_req.stop_price,
+            time_in_force=parent_req.time_in_force,
+            transmit=False,  # Don't transmit yet - will transmit with children
+        )
+        parent_order = self._create_order(parent_order_req)
+
+        # Place parent order (not transmitted yet)
+        parent_trade = self.ib.placeOrder(contract, parent_order)
+        parent_order_id = parent_trade.order.orderId
+
+        # Create stop loss order (child)
+        stop_order = self._create_order(stop_req)
+        stop_order.parentId = parent_order_id
+        stop_order.transmit = False  # Will be transmitted with take profit
+
+        # Create take profit order (child, transmit=True to send all three)
+        take_profit_order = self._create_order(take_profit_req)
+        take_profit_order.parentId = parent_order_id
+        take_profit_order.transmit = True  # Transmit all orders
+
+        # Place child orders
+        stop_trade = self.ib.placeOrder(contract, stop_order)
+        take_profit_trade = self.ib.placeOrder(contract, take_profit_order)
+
+        stop_order_id = stop_trade.order.orderId
+        take_profit_order_id = take_profit_trade.order.orderId
+
+        logger.info(
+            f"Bracket order placed: parent={parent_order_id}, "
+            f"stop_loss={stop_order_id}, take_profit={take_profit_order_id}"
+        )
+
+        # Wait for parent order acknowledgement
+        loop = asyncio.get_running_loop()
+
+        def _handle_fill(trade_obj: Trade, fill: Fill) -> None:  # pragma: no cover - callback
+            try:
+                exec_side = (
+                    OrderSide.BUY
+                    if fill.execution.side.upper() in {"BOT", "BUY"}
+                    else OrderSide.SELL
+                )
+                quantity = int(fill.execution.shares)
+                fill_price = Decimal(str(fill.execution.price))
+                commission_value = Decimal("0")
+                if fill.commissionReport is not None:
+                    commission_value = Decimal(str(fill.commissionReport.commission))
+
+                event = ExecutionEvent(
+                    order_id=trade_obj.order.orderId,
+                    contract=parent_req.contract,
+                    side=exec_side,
+                    quantity=quantity,
+                    price=fill_price,
+                    commission=commission_value,
+                    timestamp=datetime.now(UTC),
+                )
+                loop.create_task(self._publish_execution(event))
+            except Exception as exc:
+                logger.warning("Failed to handle execution event: %s", exc)
+
+        def _handle_commission(
+            trade_obj: Trade, fill: Fill, report: CommissionReport
+        ) -> None:  # pragma: no cover - callback
+            try:
+                exec_side = (
+                    OrderSide.BUY
+                    if fill.execution.side.upper() in {"BOT", "BUY"}
+                    else OrderSide.SELL
+                )
+                quantity = int(fill.execution.shares)
+                fill_price = Decimal(str(fill.execution.price))
+                commission_value = Decimal(str(report.commission))
+                event = ExecutionEvent(
+                    order_id=trade_obj.order.orderId,
+                    contract=parent_req.contract,
+                    side=exec_side,
+                    quantity=quantity,
+                    price=fill_price,
+                    commission=commission_value,
+                    timestamp=datetime.now(UTC),
+                )
+                loop.create_task(self._publish_execution(event))
+            except Exception as exc:
+                logger.warning("Failed to handle commission report: %s", exc)
+
+        # Attach callbacks to parent order
+        parent_trade.fillEvent += _handle_fill
+        parent_trade.commissionReportEvent += _handle_commission
+
+        # Wait for order acknowledgement
+        status_event = getattr(parent_trade, "statusEvent", None)
+        try:
+            if status_event is not None:
+                await asyncio.wait_for(status_event, timeout=5)
+            else:
+                await self.ib.sleep(1)
+        except TimeoutError:
+            logger.warning(
+                "Timed out waiting for bracket order acknowledgement from IBKR "
+                f"(parent_order_id={parent_order_id})"
+            )
+
+        # Get parent order status
+        ib_status = parent_trade.orderStatus
+        result_status = self._map_order_status(ib_status.status)
+        filled_quantity = int(getattr(ib_status, "filled", 0) or 0)
+        remaining_quantity = int(getattr(ib_status, "remaining", 0) or 0)
+        avg_fill_price = float(getattr(ib_status, "avgFillPrice", 0.0) or 0.0)
+
+        # Create result with child order IDs
+        result = OrderResult(
+            order_id=parent_order_id,
+            contract=parent_req.contract,
+            side=parent_req.side,
+            quantity=parent_req.quantity,
+            order_type=parent_req.order_type,
+            status=result_status,
+            filled_quantity=filled_quantity,
+            avg_fill_price=Decimal(str(avg_fill_price)),
+            parent_order_id=None,  # This is the parent
+            child_order_ids=[stop_order_id, take_profit_order_id],
+        )
+
+        logger.info(
+            f"Bracket order confirmed - Parent: {result.order_id}, "
+            f"Children: {result.child_order_ids}"
+        )
+
+        # Publish order status event
+        await self._publish_order_status(
+            OrderStatusEvent(
+                order_id=result.order_id,
+                status=result_status,
+                contract=parent_req.contract,
+                side=parent_req.side,
                 filled=filled_quantity,
                 remaining=remaining_quantity,
                 avg_fill_price=avg_fill_price,

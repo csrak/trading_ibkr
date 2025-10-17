@@ -3,9 +3,9 @@
 from datetime import datetime
 from decimal import Decimal
 from enum import Enum
-from typing import Annotated
+from typing import Annotated, Any
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, ValidationInfo, field_validator
 
 
 class OrderSide(str, Enum):
@@ -68,7 +68,7 @@ class OrderRequest(BaseModel):
 
     @field_validator("limit_price")
     @classmethod
-    def validate_limit_price(cls, v: Decimal | None, info: dict) -> Decimal | None:
+    def validate_limit_price(cls, v: Decimal | None, info: ValidationInfo) -> Decimal | None:
         """Validate limit price is provided for limit orders."""
         if info.data.get("order_type") in (OrderType.LIMIT, OrderType.STOP_LIMIT) and v is None:
             raise ValueError(f"Limit price required for {info.data.get('order_type')}")
@@ -76,7 +76,7 @@ class OrderRequest(BaseModel):
 
     @field_validator("stop_price")
     @classmethod
-    def validate_stop_price(cls, v: Decimal | None, info: dict) -> Decimal | None:
+    def validate_stop_price(cls, v: Decimal | None, info: ValidationInfo) -> Decimal | None:
         """Validate stop price is provided for stop orders."""
         if info.data.get("order_type") in (OrderType.STOP, OrderType.STOP_LIMIT) and v is None:
             raise ValueError(f"Stop price required for {info.data.get('order_type')}")
@@ -119,6 +119,87 @@ class Position(BaseModel):
     def is_short(self) -> bool:
         """Check if position is short."""
         return self.quantity < 0
+
+
+class BracketOrderRequest(BaseModel):
+    """Bracket order request (entry + stop loss + take profit).
+
+    A bracket order consists of three orders:
+    - Parent (entry): The initial order to enter a position (MARKET or LIMIT)
+    - Stop loss: Automatic stop order to limit losses
+    - Take profit: Automatic limit order to take profits
+
+    When the parent order fills, both child orders are activated. If either
+    child fills, the other is automatically cancelled.
+    """
+
+    parent: OrderRequest = Field(..., description="Entry order (parent)")
+    stop_loss: OrderRequest = Field(..., description="Stop loss order (child)")
+    take_profit: OrderRequest = Field(..., description="Take profit order (child)")
+
+    @field_validator("stop_loss")
+    @classmethod
+    def validate_stop_loss_side(cls, v: OrderRequest, info: ValidationInfo) -> OrderRequest:
+        """Ensure stop loss is on opposite side from parent."""
+        parent = info.data.get("parent")
+        if parent and v.side == parent.side:
+            raise ValueError(
+                f"Stop loss must be opposite side from parent: "
+                f"parent={parent.side}, stop_loss={v.side}"
+            )
+        return v
+
+    @field_validator("take_profit")
+    @classmethod
+    def validate_take_profit_side(cls, v: OrderRequest, info: ValidationInfo) -> OrderRequest:
+        """Ensure take profit is on opposite side from parent."""
+        parent = info.data.get("parent")
+        if parent and v.side == parent.side:
+            raise ValueError(
+                f"Take profit must be opposite side from parent: "
+                f"parent={parent.side}, take_profit={v.side}"
+            )
+        return v
+
+    @field_validator("stop_loss")
+    @classmethod
+    def validate_stop_loss_quantity(cls, v: OrderRequest, info: ValidationInfo) -> OrderRequest:
+        """Ensure stop loss quantity matches parent."""
+        parent = info.data.get("parent")
+        if parent and v.quantity != parent.quantity:
+            raise ValueError(
+                f"Stop loss quantity must match parent: "
+                f"parent={parent.quantity}, stop_loss={v.quantity}"
+            )
+        return v
+
+    @field_validator("take_profit")
+    @classmethod
+    def validate_take_profit_quantity(cls, v: OrderRequest, info: ValidationInfo) -> OrderRequest:
+        """Ensure take profit quantity matches parent."""
+        parent = info.data.get("parent")
+        if parent and v.quantity != parent.quantity:
+            raise ValueError(
+                f"Take profit quantity must match parent: "
+                f"parent={parent.quantity}, take_profit={v.quantity}"
+            )
+        return v
+
+    @field_validator("stop_loss")
+    @classmethod
+    def validate_stop_loss_is_stop_order(cls, v: OrderRequest) -> OrderRequest:
+        """Ensure stop loss is a STOP order."""
+        if v.order_type not in (OrderType.STOP, OrderType.STOP_LIMIT):
+            raise ValueError(f"Stop loss must be STOP or STOP_LIMIT, got {v.order_type}")
+        return v
+
+    @field_validator("take_profit")
+    @classmethod
+    def validate_take_profit_is_limit_order(cls, v: OrderRequest) -> OrderRequest:
+        """Ensure take profit is a LIMIT order."""
+        if v.order_type != OrderType.LIMIT:
+            raise ValueError(f"Take profit must be LIMIT order, got {v.order_type}")
+        return v
 
 
 class MarketData(BaseModel):
