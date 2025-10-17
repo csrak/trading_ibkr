@@ -1438,5 +1438,79 @@ def cache_option_chain_command(
     )
 
 
+@app.command()
+def dashboard(
+    verbose: bool = typer.Option(False, "--verbose", "-v", help="Enable verbose logging"),
+) -> None:
+    """Launch real-time trading dashboard with live P&L monitoring."""
+    config = load_config()
+    setup_logging(config.log_dir, verbose)
+
+    asyncio.run(run_dashboard(config))
+
+
+async def run_dashboard(config: "IBKRConfig") -> None:  # noqa: F821
+    """Run dashboard asynchronously."""
+    from ibkr_trader.dashboard import TradingDashboard
+
+    # Initialize components
+    event_bus = EventBus()
+    snapshot_path = config.data_dir / DEFAULT_PORTFOLIO_SNAPSHOT.name
+    portfolio = PortfolioState(
+        Decimal(str(config.max_daily_loss)),
+        snapshot_path=snapshot_path,
+    )
+    risk_guard = RiskGuard(
+        portfolio=portfolio,
+        max_exposure=Decimal(str(config.max_order_exposure)),
+    )
+    guard = LiveTradingGuard(config=config, live_flag_enabled=False)
+    broker = IBKRBroker(
+        config=config,
+        guard=guard,
+        event_bus=event_bus,
+        risk_guard=risk_guard,
+    )
+    market_data = MarketDataService(event_bus=event_bus)
+
+    try:
+        # Connect to IBKR
+        await broker.connect()
+        logger.info("Connected to IBKR - loading account data...")
+
+        # Load initial state
+        account_summary = await broker.get_account_summary()
+        await portfolio.update_account(account_summary)
+        positions = await broker.get_positions()
+        await portfolio.update_positions(positions)
+
+        # Subscribe to market data for all positions
+        if not config.use_mock_market_data:
+            market_data.attach_ib(broker.ib)
+            for symbol in portfolio.snapshot.positions:
+                request = SubscriptionRequest(SymbolContract(symbol=symbol))
+                context = market_data.subscribe(request)
+                await context.__aenter__()
+
+        # Create and run dashboard
+        dash = TradingDashboard(
+            event_bus=event_bus,
+            portfolio=portfolio,
+            max_position_size=config.max_position_size,
+            max_daily_loss=Decimal(str(config.max_daily_loss)),
+        )
+
+        logger.info("Starting dashboard...")
+        await dash.run()
+
+    except KeyboardInterrupt:
+        logger.info("Dashboard stopped by user")
+    except Exception as e:
+        logger.error(f"Dashboard error: {e}")
+        raise
+    finally:
+        await broker.disconnect()
+
+
 if __name__ == "__main__":
     app()
