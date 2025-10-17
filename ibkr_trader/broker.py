@@ -18,6 +18,7 @@ from ib_insync import (
     OrderState,
     StopOrder,
     Trade,
+    util,
 )
 from loguru import logger
 
@@ -37,6 +38,10 @@ from ibkr_trader.safety import LiveTradingGuard
 
 if TYPE_CHECKING:
     from ibkr_trader.portfolio import RiskGuard
+
+# Patch asyncio to work correctly with ib_insync
+# This is required when using asyncio.run() with ib_insync
+util.patchAsyncio()
 
 
 class IBKRBroker:
@@ -80,12 +85,10 @@ class IBKRBroker:
         )
 
         try:
-            is_connected = await asyncio.wait_for(
-                self.ib.connectAsync(
-                    host=self.config.host,
-                    port=self.config.port,
-                    clientId=self.config.client_id,
-                ),
+            is_connected = await self.ib.connectAsync(
+                host=self.config.host,
+                port=self.config.port,
+                clientId=self.config.client_id,
                 timeout=timeout,
             )
         except TimeoutError as exc:

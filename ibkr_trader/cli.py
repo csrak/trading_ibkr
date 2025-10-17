@@ -32,7 +32,12 @@ from ibkr_trader.events import (
     OrderStatusEvent,
 )
 from ibkr_trader.market_data import MarketDataService, SubscriptionRequest
-from ibkr_trader.models import OrderRequest, OrderSide, OrderType, SymbolContract
+from ibkr_trader.models import (
+    OrderRequest,
+    OrderSide,
+    OrderType,
+    SymbolContract,
+)
 from ibkr_trader.portfolio import PortfolioState, RiskGuard
 from ibkr_trader.presets import get_preset, preset_names
 from ibkr_trader.safety import LiveTradingGuard

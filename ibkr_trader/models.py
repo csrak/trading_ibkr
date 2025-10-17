@@ -3,7 +3,7 @@
 from datetime import datetime
 from decimal import Decimal
 from enum import Enum
-from typing import Annotated, Any
+from typing import Annotated
 
 from pydantic import BaseModel, Field, ValidationInfo, field_validator
 

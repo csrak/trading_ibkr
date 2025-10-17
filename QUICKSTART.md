@@ -27,8 +27,16 @@ uv pip install -e ".[dev]"
 1. **TWS**: Edit → Global Configuration → API → Settings
 2. **Gateway**: Configure → Settings → API
 3. Enable "Enable ActiveX and Socket Clients"
-4. Add `127.0.0.1` to trusted IPs
+4. Add `127.0.0.1` to trusted IPs (or WSL IP if running from WSL - see below)
 5. Note the port (default paper: `7497`)
+
+### WSL Users (Windows)
+If running from WSL, find the Windows host IP with PowerShell:
+```powershell
+Get-NetIPAddress -AddressFamily IPv4 |
+  Where-Object {$_.InterfaceAlias -like "vEthernet*"} |
+  Select-Object InterfaceAlias,IPAddress,PrefixLength
+```
 
 ## 4. Create Environment File
 
@@ -40,7 +48,7 @@ Edit `.env`:
 ```bash
 IBKR_TRADING_MODE=paper
 IBKR_PORT=7497
-IBKR_HOST=127.0.0.1
+IBKR_HOST=127.0.0.1  # Or 192.168.x.x for WSL (see above)
 ```
 
 ## 5. Test Connection
@@ -96,14 +104,16 @@ ibkr-trader run --symbol AAPL -v
 
 ## Common Issues
 
-### "Connection refused"
+### "Connection refused" or "Connection timeout"
 - **Solution**: Ensure TWS/Gateway is running
-- Check port matches your configuration
+- Check port matches your configuration (7497 for paper, 7496 for live)
 - Verify API access is enabled
+- **WSL Users**: Use Windows host IP (192.168.x.x) instead of 127.0.0.1
 
 ### "Invalid client ID"
 - **Solution**: Use a unique client ID
-- Set `IBKR_CLIENT_ID=2` in `.env` if ID 1 is in use
+- Set `CLIENT_ID=2` in `.env` if ID 1 is in use
+- Each connection needs a unique client ID
 
 ### "No market data"
 - **Solution**: Subscribe to market data in TWS

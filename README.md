@@ -61,10 +61,27 @@ pip install -e ".[dev]"
 2. Enable API connections:
    - TWS: Configure → API → Settings
    - Check "Enable ActiveX and Socket Clients"
-   - Add `127.0.0.1` to trusted IPs
+   - Add `127.0.0.1` to trusted IPs (or WSL IP if running from WSL)
 3. Note the port:
    - **Paper Trading**: Port `7497`
    - **Live Trading**: Port `7496`
+
+#### Finding WSL IP Address (Windows Users)
+
+If you're running this code in WSL (Windows Subsystem for Linux) and TWS/Gateway on Windows, you need to use the Windows host IP instead of `127.0.0.1`. Find it with PowerShell:
+
+```powershell
+# Run this in PowerShell on Windows
+Get-NetIPAddress -AddressFamily IPv4 |
+  Where-Object {$_.InterfaceAlias -like "vEthernet*"} |
+  Select-Object InterfaceAlias,IPAddress,PrefixLength
+```
+
+Use the returned IP address (typically `192.168.x.x`) as your `IBKR_HOST` in `.env`:
+
+```bash
+IBKR_HOST=192.168.112.1  # Example - use your actual WSL bridge IP
+```
 
 ### Environment Configuration
 
@@ -74,7 +91,7 @@ Create a `.env` file:
 # Paper trading (default - safe)
 IBKR_TRADING_MODE=paper
 IBKR_PORT=7497
-IBKR_HOST=127.0.0.1
+IBKR_HOST=127.0.0.1  # Use 192.168.x.x if running from WSL (see above)
 
 # Safety limits
 IBKR_MAX_POSITION_SIZE=100
