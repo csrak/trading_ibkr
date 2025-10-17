@@ -1,0 +1,39 @@
+{
+  "name": "dual_sma_demo",
+  "strategies": [
+    {
+      "id": "sma_fast",
+      "type": "sma",
+      "symbols": ["AAPL"],
+      "config_path": null,
+      "params": {
+        "fast_period": 5,
+        "slow_period": 15,
+        "position_size": 5
+      },
+      "max_position": 5,
+      "warmup_bars": 0
+    },
+    {
+      "id": "sma_slow",
+      "type": "sma",
+      "symbols": ["MSFT"],
+      "config_path": null,
+      "params": {
+        "fast_period": 12,
+        "slow_period": 30,
+        "position_size": 3
+      },
+      "max_position": 3,
+      "warmup_bars": 0
+    }
+  ],
+  "capital_policy": {
+    "type": "equal_weight"
+  },
+  "settings": {
+    "allow_partial_start": false,
+    "heartbeat_timeout_seconds": 30,
+    "telemetry_interval_seconds": 60
+  }
+}

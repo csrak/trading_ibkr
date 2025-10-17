@@ -57,6 +57,11 @@ uv run ruff check --fix ibkr_trader tests
 git config core.hooksPath .githooks
 ```
 
+## Operational Guidelines
+
+- When running long-lived CLI commands (e.g., `ibkr-trader run …`) from automation or shared terminals, wrap the invocation with a timeout (`timeout`, `uv --timeout`, etc.) so sessions never continue unattended.
+- Always call out active runs in status updates and confirm they have been stopped (or hand off responsibility) before ending a coding session.
+
 ## Architecture Overview
 
 The codebase follows a clean, event-driven architecture with clear separation of concerns:

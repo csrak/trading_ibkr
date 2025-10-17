@@ -40,6 +40,8 @@ from ibkr_trader.strategy import SimpleMovingAverageStrategy, SMAConfig
 from ibkr_trader.strategy_adapters import ConfigBasedLiveStrategy
 from ibkr_trader.strategy_configs.config import load_strategy_config
 from ibkr_trader.strategy_configs.factory import StrategyFactory
+from ibkr_trader.strategy_configs.graph import StrategyGraphConfig, load_strategy_graph
+from ibkr_trader.strategy_coordinator import StrategyCoordinator
 from ibkr_trader.telemetry import build_telemetry_reporter
 
 trading_app = typer.Typer()
@@ -786,17 +788,20 @@ async def run_strategy(
 
     # Initialize broker
     event_bus = EventBus()
+    graph_config: StrategyGraphConfig | None = None
     telemetry = build_telemetry_reporter(
         event_bus=event_bus,
         file_path=config.log_dir / "telemetry.jsonl",
     )
+    is_graph_path = bool(config_path and str(config_path).endswith(".graph.json"))
     telemetry.info(
         "Telemetry configured for strategy run",
         context={
             "symbols": symbols,
             "price_cache_ttl": config.training_price_cache_ttl,
             "option_cache_ttl": config.training_option_cache_ttl,
-            "config_based": config_path is not None,
+            "config_based": config_path is not None and not is_graph_path,
+            "graph_config": is_graph_path,
         },
     )
     market_data = MarketDataService(event_bus=event_bus)
@@ -815,6 +820,7 @@ async def run_strategy(
         event_bus=event_bus,
         risk_guard=risk_guard,
     )
+    coordinator: StrategyCoordinator | None = None
     strategy: SimpleMovingAverageStrategy | ConfigBasedLiveStrategy | None = None
     order_task: asyncio.Task[None] | None = None
     execution_task: asyncio.Task[None] | None = None
@@ -837,13 +843,35 @@ async def run_strategy(
         await portfolio.update_positions(positions)
         await portfolio.persist()
 
+        if config_path is not None and str(config_path).endswith(".graph.json"):
+            graph_config = load_strategy_graph(config_path)
+            telemetry.info(
+                "Strategy graph loaded",
+                context={
+                    "graph_name": graph_config.name,
+                    "strategy_count": len(graph_config.strategies),
+                },
+            )
+            symbols = sorted(
+                {symbol for node in graph_config.strategies for symbol in node.symbols}
+            )
+            logger.info(
+                "Loaded strategy graph '%s' with %d strategies (%s)",
+                graph_config.name,
+                len(graph_config.strategies),
+                ", ".join(symbols),
+            )
+        elif config_path is not None:
+            graph_config = None
         if not config.use_mock_market_data:
             market_data.attach_ib(broker.ib)
-            # Determine which symbols to subscribe to
-            subscribe_symbols = symbols
-            if config_path is not None:
-                strat_config = load_strategy_config(config_path)
-                subscribe_symbols = [strat_config.symbol]
+            if graph_config is not None:
+                subscribe_symbols = symbols
+            else:
+                subscribe_symbols = symbols
+                if config_path is not None:
+                    strat_config = load_strategy_config(config_path)
+                    subscribe_symbols = [strat_config.symbol]
 
             for symbol in subscribe_symbols:
                 request = SubscriptionRequest(SymbolContract(symbol=symbol))
@@ -851,18 +879,28 @@ async def run_strategy(
                 await context.__aenter__()
                 stream_contexts.append(context)
 
+        if graph_config is not None:
+            coordinator = StrategyCoordinator(
+                broker=broker,
+                event_bus=event_bus,
+                market_data=market_data,
+                risk_guard=risk_guard,
+                telemetry=telemetry,
+                subscribe_market_data=False,
+            )
+            await coordinator.start(graph_config)
+            logger.info(
+                "Strategy coordinator initialized with %d strategies",
+                len(coordinator.strategies),
+            )
         # Initialize strategy based on config or default SMA
-        if config_path is not None:
-            # Config-based strategy loading
+        elif config_path is not None:
             strat_config = load_strategy_config(config_path)
             logger.info(
                 f"Loaded strategy config: {strat_config.name} ({strat_config.strategy_type})"
             )
 
-            # Create replay strategy instance
             replay_strategy = StrategyFactory.create(strat_config)
-
-            # Wrap in live adapter
             strategy = ConfigBasedLiveStrategy(
                 impl=replay_strategy,
                 broker=broker,
@@ -892,7 +930,8 @@ async def run_strategy(
                 f"size={position_size}"
             )
 
-        await strategy.start()
+        if strategy is not None:
+            await strategy.start()
 
         async def order_status_listener() -> None:
             subscription = event_bus.subscribe(EventTopic.ORDER_STATUS)
@@ -960,6 +999,8 @@ async def run_strategy(
         logger.error(f"Error during execution: {e}")
         raise
     finally:
+        if coordinator is not None:
+            await coordinator.stop()
         if strategy is not None:
             await strategy.stop()
         if order_task is not None:

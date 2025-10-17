@@ -138,7 +138,15 @@ ibkr-trader run --symbol AAPL --size 50
 
 # Verbose logging
 ibkr-trader run --symbol AAPL -v
+
+# Coordinator graph (multiple strategies via .graph.json)
+ibkr-trader run --config strategy_configs/examples/dual_sma.graph.json
 ```
+
+Providing a configuration file ending in `.graph.json` activates the multi-strategy
+coordinator. The sample `strategy_configs/examples/dual_sma.graph.json` runs two SMA
+variants side by side, sharing the same broker connection while respecting the capital
+envelopes declared in the graph.
 
 ## Documentation
 

@@ -135,7 +135,14 @@ async def test_broker_proxy_clips_quantity_and_notional() -> None:
     policy.prepare(graph)
 
     broker = CaptureBroker()
-    proxy = CoordinatorBrokerProxy(strategy_id="s1", base_broker=broker, policy=policy)
+    proxy = CoordinatorBrokerProxy(
+        strategy_id="s1",
+        base_broker=broker,
+        policy=policy,
+        risk_guard=None,
+        telemetry=None,
+        exposure_hook=None,
+    )
 
     request = OrderRequest(
         contract=SymbolContract(symbol="AAPL"),
@@ -167,7 +174,14 @@ async def test_broker_proxy_rejects_when_notional_allows_zero() -> None:
     policy.prepare(graph)
 
     broker = CaptureBroker()
-    proxy = CoordinatorBrokerProxy(strategy_id="s1", base_broker=broker, policy=policy)
+    proxy = CoordinatorBrokerProxy(
+        strategy_id="s1",
+        base_broker=broker,
+        policy=policy,
+        risk_guard=None,
+        telemetry=None,
+        exposure_hook=None,
+    )
 
     request = OrderRequest(
         contract=SymbolContract(symbol="AAPL"),

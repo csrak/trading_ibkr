@@ -102,6 +102,17 @@ ibkr-trader run --symbol AAPL --size 50
 ibkr-trader run --symbol AAPL -v
 ```
 
+## 8. Run Multiple Strategies
+
+```bash
+ibkr-trader run --config strategy_configs/examples/dual_sma.graph.json
+```
+
+Any `--config` path ending with `.graph.json` spins up the strategy coordinator so you
+can run multiple strategies at once. The included demo graph launches two SMA
+configurations (AAPL + MSFT) with independent sizing caps while sharing the same broker
+and market data streams.
+
 ## Common Issues
 
 ### "Connection refused" or "Connection timeout"
