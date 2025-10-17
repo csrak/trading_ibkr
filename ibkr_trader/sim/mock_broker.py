@@ -6,9 +6,6 @@ import asyncio
 from datetime import UTC, datetime
 from decimal import Decimal
 
-from model.data.models import OrderStateSnapshot
-from model.data.models import OrderStatus as MMOrderStatus
-
 from ibkr_trader.events import EventBus, EventTopic, ExecutionEvent, OrderStatusEvent
 from ibkr_trader.models import (
     OrderRequest,
@@ -16,8 +13,11 @@ from ibkr_trader.models import (
     OrderSide,
     OrderStatus,
     OrderType,
+    Position,
     SymbolContract,
 )
+from model.data.models import OrderStateSnapshot
+from model.data.models import OrderStatus as MMOrderStatus
 
 
 class MockBroker:
@@ -28,6 +28,7 @@ class MockBroker:
         self._next_order_id = 1
         self._orders: dict[int, OrderStateSnapshot] = {}
         self._order_meta: dict[int, tuple[SymbolContract, OrderSide]] = {}
+        self._positions: dict[str, int] = {}
         self._lock = asyncio.Lock()
 
     async def submit_limit_order(self, request: OrderRequest) -> OrderResult:
@@ -89,7 +90,7 @@ class MockBroker:
                 contract=meta[0],
                 side=meta[1],
                 filled=int(state.filled_qty),
-                remaining=int(state.remaining_qty or 0),
+                remaining=int(state.remaining_qty if state.remaining_qty is not None else 0),
                 avg_fill_price=float(state.avg_price or 0.0),
                 timestamp=datetime.now(UTC),
             ),
@@ -107,7 +108,9 @@ class MockBroker:
             if state is None or meta is None:
                 return
             state.filled_qty += fill_quantity
-            remaining = max(0.0, (state.remaining_qty or 0) - fill_quantity)
+            remaining = max(
+                0.0, (state.remaining_qty if state.remaining_qty is not None else 0.0) - fill_quantity
+            )
             state.remaining_qty = remaining
             state.avg_price = float(fill_price)
             state.updated_at = datetime.now(UTC)
@@ -119,7 +122,7 @@ class MockBroker:
             EventTopic.ORDER_STATUS,
             OrderStatusEvent(
                 order_id=order_id,
-                status=OrderStatus.FILLED if remaining <= 0 else OrderStatus.PARTIALLY_FILLED,
+                status=OrderStatus.FILLED if remaining <= 0 else OrderStatus.SUBMITTED,
                 contract=contract,
                 side=side,
                 filled=int(state.filled_qty),
@@ -141,3 +144,35 @@ class MockBroker:
                 timestamp=datetime.now(UTC),
             ),
         )
+
+        # Update position tracking
+        delta = fill_quantity if side == OrderSide.BUY else -fill_quantity
+        symbol = contract.symbol
+        self._positions[symbol] = self._positions.get(symbol, 0) + delta
+        if self._positions[symbol] == 0:
+            self._positions.pop(symbol, None)
+
+    async def place_order(self, request: OrderRequest) -> OrderResult:
+        """Place an order (BrokerProtocol compliance).
+
+        For now, delegates to submit_limit_order for LIMIT orders.
+        Other order types will raise ValueError.
+        """
+        return await self.submit_limit_order(request)
+
+    async def get_positions(self) -> list[Position]:
+        """Get current positions (BrokerProtocol compliance).
+
+        Returns list of positions tracked internally from fills.
+        """
+        return [
+            Position(
+                contract=SymbolContract(symbol=symbol),
+                quantity=quantity,
+                avg_cost=Decimal("0"),
+                market_value=Decimal("0"),
+                unrealized_pnl=Decimal("0"),
+            )
+            for symbol, quantity in self._positions.items()
+            if quantity != 0
+        ]
