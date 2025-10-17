@@ -239,6 +239,42 @@ def _tail_telemetry_entries(telemetry_file: Path, tail: int) -> list[str]:
     return formatted
 
 
+def _emit_run_summary(
+    *,
+    config: "IBKRConfig",  # noqa: F821
+    telemetry: TelemetryReporter,
+    label: str,
+    tail: int = 100,
+) -> None:
+    snapshot_path = config.data_dir / DEFAULT_PORTFOLIO_SNAPSHOT.name
+    telemetry_file = config.log_dir / "telemetry.jsonl"
+    summary = summarize_run(snapshot_path, _tail_telemetry_entries(telemetry_file, tail))
+
+    logger.info("Session summary ({}): {}", label, summary.headline())
+
+    if summary.telemetry_warnings:
+        warning_lines = "\n".join(f"  {line}" for line in summary.telemetry_warnings)
+        logger.warning("Recent telemetry warnings ({}):\n{}", label, warning_lines)
+
+    telemetry.info(
+        "run_summary",
+        context={
+            "label": label,
+            "headline": summary.headline(),
+            "telemetry_warnings": summary.telemetry_warnings,
+            "recommended_actions": summary.recommended_actions,
+            "trade_stats": summary.trade_stats,
+        },
+    )
+
+    if summary.recommended_actions:
+        logger.info("Recommended actions (%s):", label)
+        for action in summary.recommended_actions:
+            logger.info("  - %s", action)
+    if summary.trade_stats:
+        logger.info("Trade statistics (%s): %s", label, summary.trade_stats)
+
+
 @app.command()
 def diagnostics(
     show_metadata: bool = typer.Option(
@@ -550,6 +586,7 @@ async def run_strategy(
     execution_task: asyncio.Task[None] | None = None
     diagnostic_task: asyncio.Task[None] | None = None
     stream_contexts: list[AbstractAsyncContextManager[None]] = []
+    run_label = f"{config.trading_mode.value}-run"
 
     try:
         # Connect to IBKR
@@ -669,6 +706,7 @@ async def run_strategy(
             with suppress(asyncio.CancelledError):
                 await diagnostic_task
         await broker.disconnect()
+        _emit_run_summary(config=config, telemetry=telemetry, label=run_label)
         logger.info("Strategy stopped")
 
 
@@ -1032,6 +1070,10 @@ def backtest(
     ]
 
     event_bus = EventBus()
+    telemetry = build_telemetry_reporter(
+        event_bus=event_bus,
+        file_path=config.log_dir / "telemetry.jsonl",
+    )
     market_data = SimulatedMarketData(event_bus)
     snapshot_path = config.data_dir / DEFAULT_PORTFOLIO_SNAPSHOT.name
     portfolio = PortfolioState(Decimal(str(config.max_daily_loss)), snapshot_path=snapshot_path)
@@ -1089,6 +1131,7 @@ def backtest(
     asyncio.run(engine.run(strategy, bars))
 
     logger.info("Backtest completed with %s executions", len(broker.execution_events))
+    _emit_run_summary(config=config, telemetry=telemetry, label="backtest")
 
 
 @app.command("train-model")

@@ -43,6 +43,14 @@ class PortfolioState:
         if snapshot_path is not None:
             self._load_snapshot(snapshot_path)
 
+        self._trade_stats: dict[str, Decimal] = {
+            "fills": Decimal("0"),
+            "buy_volume": Decimal("0"),
+            "sell_volume": Decimal("0"),
+        }
+        self._realized_pnl = Decimal("0")
+        self._symbol_pnl: dict[str, Decimal] = {}
+
     async def update_account(self, summary: dict[str, str]) -> None:
         async with self._lock:
             self.snapshot.net_liquidation = Decimal(summary.get("NetLiquidation", "0"))
@@ -72,6 +80,20 @@ class PortfolioState:
             filled=event.quantity,
             avg_price=event.price,
         )
+
+        volume = Decimal(event.quantity) * event.price
+        async with self._lock:
+            self._trade_stats["fills"] += Decimal("1")
+            if event.side == OrderSide.BUY:
+                self._trade_stats["buy_volume"] += volume
+            else:
+                self._trade_stats["sell_volume"] += volume
+            side_multiplier = Decimal("1") if event.side == OrderSide.SELL else Decimal("-1")
+            pnl_delta = side_multiplier * volume
+            self._realized_pnl += pnl_delta
+            self._symbol_pnl[event.contract.symbol] = (
+                self._symbol_pnl.get(event.contract.symbol, Decimal("0")) + pnl_delta
+            )
 
     async def check_daily_loss_limit(self) -> None:
         async with self._lock:
@@ -104,6 +126,15 @@ class PortfolioState:
                 buying_power=Decimal(decoded.get("buying_power", "0")),
                 realized_pnl_today=Decimal(decoded.get("realized_pnl_today", "0")),
             )
+            trade_stats = decoded.get("trade_stats") or {}
+            self._trade_stats = {
+                "fills": Decimal(trade_stats.get("fills", "0")),
+                "buy_volume": Decimal(trade_stats.get("buy_volume", "0")),
+                "sell_volume": Decimal(trade_stats.get("sell_volume", "0")),
+            }
+            self._realized_pnl = Decimal(decoded.get("realized_pnl", "0"))
+            symbol_pnl = decoded.get("symbol_pnl") or {}
+            self._symbol_pnl = {symbol: Decimal(value) for symbol, value in symbol_pnl.items()}
             logger.info("Loaded portfolio snapshot from %s", path)
         except Exception as exc:  # pragma: no cover - only on IO failure
             logger.warning("Failed to load portfolio snapshot: %s", exc)
@@ -117,6 +148,9 @@ class PortfolioState:
                 "total_cash": str(self.snapshot.total_cash),
                 "buying_power": str(self.snapshot.buying_power),
                 "realized_pnl_today": str(self.snapshot.realized_pnl_today),
+                "trade_stats": {key: str(value) for key, value in self._trade_stats.items()},
+                "realized_pnl": str(self._realized_pnl),
+                "symbol_pnl": {symbol: str(value) for symbol, value in self._symbol_pnl.items()},
                 "positions": {
                     symbol: position.model_dump()
                     for symbol, position in self.snapshot.positions.items()
@@ -127,6 +161,18 @@ class PortfolioState:
             self._snapshot_path.write_text(json.dumps(data, indent=2), encoding="utf-8")
         except Exception as exc:  # pragma: no cover - only on IO failure
             logger.warning("Failed to persist portfolio snapshot: %s", exc)
+
+    async def trade_statistics(self) -> dict[str, str]:
+        async with self._lock:
+            return {key: str(value) for key, value in self._trade_stats.items()}
+
+    async def realized_pnl(self) -> str:
+        async with self._lock:
+            return str(self._realized_pnl)
+
+    async def per_symbol_pnl(self) -> dict[str, str]:
+        async with self._lock:
+            return {symbol: str(value) for symbol, value in self._symbol_pnl.items()}
 
 
 class RiskGuard:

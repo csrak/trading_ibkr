@@ -13,6 +13,7 @@ import pytest
 from typer.testing import CliRunner
 
 from ibkr_trader import cli
+from ibkr_trader.cli import _emit_run_summary
 from ibkr_trader.config import IBKRConfig, TradingMode
 from ibkr_trader.constants import DEFAULT_PORTFOLIO_SNAPSHOT
 from ibkr_trader.models import OrderRequest, OrderResult, OrderStatus
@@ -636,3 +637,50 @@ def test_session_status_outputs_snapshot_and_telemetry(
     assert result.exit_code == 0, result.stdout
     assert "NetLiq=12345" in result.stdout
     assert "cache nearing ttl" in result.stdout
+
+
+def test_emit_run_summary_logs(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    data_dir = tmp_path / "data"
+    log_dir = tmp_path / "logs"
+    config = IBKRConfig(data_dir=data_dir, log_dir=log_dir)
+
+    snapshot_path = config.data_dir / DEFAULT_PORTFOLIO_SNAPSHOT.name
+    snapshot_path.write_text(
+        json.dumps(
+            {
+                "net_liquidation": "20000",
+                "total_cash": "15000",
+                "buying_power": "18000",
+                "positions": {"MSFT": {"quantity": 5}},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    telemetry_file = config.log_dir / "telemetry.jsonl"
+    telemetry_file.write_text(
+        json.dumps(
+            {
+                "timestamp": "2024-01-02T09:00:00Z",
+                "level": "WARNING",
+                "message": "rate limit approaching",
+                "context": {"ratio": 0.85},
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    class DummyTelemetry:
+        def __init__(self) -> None:
+            self.calls: list[tuple[str, dict[str, object] | None]] = []
+
+        def info(self, message: str, *, context: dict[str, object] | None = None) -> None:
+            self.calls.append((message, context))
+
+    telemetry = DummyTelemetry()
+
+    _emit_run_summary(config=config, telemetry=telemetry, label="unit-test", tail=10)
+    assert telemetry.calls
