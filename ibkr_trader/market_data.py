@@ -37,9 +37,12 @@ class MarketDataService:
         self._ib: IB | None = None
         self._subscriptions: dict[str, tuple[Ticker, Callable[[Ticker], None]]] = {}
 
-    async def publish_price(self, symbol: str, price: Decimal) -> None:
+    async def publish_price(
+        self, symbol: str, price: Decimal, timestamp: datetime | None = None
+    ) -> None:
         """Publish a price update to the bus (external feed integration point)."""
-        event = MarketDataEvent(symbol=symbol, price=price, timestamp=datetime.now(UTC))
+        event_time = timestamp or datetime.now(UTC)
+        event = MarketDataEvent(symbol=symbol, price=price, timestamp=event_time)
         await self._event_bus.publish(EventTopic.MARKET_DATA, event)
 
     @asynccontextmanager

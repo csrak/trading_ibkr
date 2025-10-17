@@ -13,7 +13,8 @@ import pytest
 from typer.testing import CliRunner
 
 from ibkr_trader import cli
-from ibkr_trader.cli import _emit_run_summary
+from ibkr_trader.cli_commands import data, monitoring, trading, utils
+from ibkr_trader.cli_commands.utils import emit_run_summary as _emit_run_summary
 from ibkr_trader.config import IBKRConfig, TradingMode
 from ibkr_trader.constants import DEFAULT_PORTFOLIO_SNAPSHOT
 from ibkr_trader.models import OrderRequest, OrderResult, OrderStatus
@@ -74,7 +75,9 @@ class DummyMarketDataService:
     def __init__(self, event_bus: object) -> None:
         self.event_bus = event_bus
 
-    async def publish_price(self, symbol: str, price: object) -> None:
+    async def publish_price(
+        self, symbol: str, price: object, timestamp: datetime | None = None
+    ) -> None:
         return None
 
     def attach_ib(self, ib: object) -> None:  # pragma: no cover - tests mock IB usage
@@ -91,16 +94,16 @@ class DummyMarketDataService:
 def test_paper_order_cli_submits_market_order(monkeypatch: pytest.MonkeyPatch) -> None:
     config = IBKRConfig(trading_mode=TradingMode.PAPER)
 
-    monkeypatch.setattr(cli, "load_config", lambda: config)
-    monkeypatch.setattr(cli, "setup_logging", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(trading, "load_config", lambda: config)
+    monkeypatch.setattr(utils, "setup_logging", lambda *_args, **_kwargs: None)
     dummy_broker = DummyBroker(config=config, guard=None)
     monkeypatch.setattr(
-        cli,
+        trading,
         "IBKRBroker",
         lambda config, guard, event_bus=None, risk_guard=None: dummy_broker,
     )
     monkeypatch.setattr(
-        cli, "MarketDataService", lambda event_bus: DummyMarketDataService(event_bus)
+        trading, "MarketDataService", lambda event_bus: DummyMarketDataService(event_bus)
     )
 
     result = runner.invoke(
@@ -120,8 +123,8 @@ def test_paper_order_cli_submits_market_order(monkeypatch: pytest.MonkeyPatch) -
 
 def test_paper_order_requires_limit_price(monkeypatch: pytest.MonkeyPatch) -> None:
     config = IBKRConfig(trading_mode=TradingMode.PAPER)
-    monkeypatch.setattr(cli, "load_config", lambda: config)
-    monkeypatch.setattr(cli, "setup_logging", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(trading, "load_config", lambda: config)
+    monkeypatch.setattr(utils, "setup_logging", lambda *_args, **_kwargs: None)
 
     result = runner.invoke(
         cli.app,
@@ -134,8 +137,8 @@ def test_paper_order_requires_limit_price(monkeypatch: pytest.MonkeyPatch) -> No
 
 def test_paper_order_invalid_limit_format(monkeypatch: pytest.MonkeyPatch) -> None:
     config = IBKRConfig(trading_mode=TradingMode.PAPER)
-    monkeypatch.setattr(cli, "load_config", lambda: config)
-    monkeypatch.setattr(cli, "setup_logging", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(trading, "load_config", lambda: config)
+    monkeypatch.setattr(utils, "setup_logging", lambda *_args, **_kwargs: None)
 
     result = runner.invoke(
         cli.app,
@@ -149,16 +152,16 @@ def test_paper_order_invalid_limit_format(monkeypatch: pytest.MonkeyPatch) -> No
 def test_paper_order_allows_custom_contract(monkeypatch: pytest.MonkeyPatch) -> None:
     config = IBKRConfig(trading_mode=TradingMode.PAPER)
 
-    monkeypatch.setattr(cli, "load_config", lambda: config)
-    monkeypatch.setattr(cli, "setup_logging", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(trading, "load_config", lambda: config)
+    monkeypatch.setattr(utils, "setup_logging", lambda *_args, **_kwargs: None)
     dummy_broker = DummyBroker(config=config, guard=None)
     monkeypatch.setattr(
-        cli,
+        trading,
         "IBKRBroker",
         lambda config, guard, event_bus=None, risk_guard=None: dummy_broker,
     )
     monkeypatch.setattr(
-        cli, "MarketDataService", lambda event_bus: DummyMarketDataService(event_bus)
+        trading, "MarketDataService", lambda event_bus: DummyMarketDataService(event_bus)
     )
 
     result = runner.invoke(
@@ -185,8 +188,8 @@ def test_paper_order_allows_custom_contract(monkeypatch: pytest.MonkeyPatch) -> 
 
 def test_paper_order_rejects_live_mode(monkeypatch: pytest.MonkeyPatch) -> None:
     config = IBKRConfig(trading_mode=TradingMode.LIVE)
-    monkeypatch.setattr(cli, "load_config", lambda: config)
-    monkeypatch.setattr(cli, "setup_logging", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(trading, "load_config", lambda: config)
+    monkeypatch.setattr(utils, "setup_logging", lambda *_args, **_kwargs: None)
 
     result = runner.invoke(
         cli.app,
@@ -199,16 +202,16 @@ def test_paper_order_rejects_live_mode(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_paper_order_preview(monkeypatch: pytest.MonkeyPatch) -> None:
     config = IBKRConfig(trading_mode=TradingMode.PAPER)
 
-    monkeypatch.setattr(cli, "load_config", lambda: config)
-    monkeypatch.setattr(cli, "setup_logging", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(trading, "load_config", lambda: config)
+    monkeypatch.setattr(utils, "setup_logging", lambda *_args, **_kwargs: None)
     dummy_broker = DummyBroker(config=config, guard=None)
     monkeypatch.setattr(
-        cli,
+        trading,
         "IBKRBroker",
         lambda config, guard, event_bus=None, risk_guard=None: dummy_broker,
     )
     monkeypatch.setattr(
-        cli, "MarketDataService", lambda event_bus: DummyMarketDataService(event_bus)
+        trading, "MarketDataService", lambda event_bus: DummyMarketDataService(event_bus)
     )
 
     result = runner.invoke(
@@ -222,8 +225,8 @@ def test_paper_order_preview(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def test_train_model_cli_uses_data_client(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     config = IBKRConfig(trading_mode=TradingMode.PAPER)
-    monkeypatch.setattr(cli, "load_config", lambda: config)
-    monkeypatch.setattr(cli, "setup_logging", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(data, "load_config", lambda: config)
+    monkeypatch.setattr(utils, "setup_logging", lambda *_args, **_kwargs: None)
 
     captured: dict[str, object] = {}
 
@@ -238,7 +241,7 @@ def test_train_model_cli_uses_data_client(monkeypatch: pytest.MonkeyPatch, tmp_p
         predictions_path.write_text("timestamp,predicted_price\n")
         return model_path
 
-    monkeypatch.setattr(cli, "train_linear_industry_model", fake_train_linear_industry_model)
+    monkeypatch.setattr(data, "train_linear_industry_model", fake_train_linear_industry_model)
 
     source_closed = {"value": False}
     captured_create: dict[str, object] = {}
@@ -272,7 +275,7 @@ def test_train_model_cli_uses_data_client(monkeypatch: pytest.MonkeyPatch, tmp_p
         return dummy_client, DummySource()
 
     monkeypatch.setattr(
-        cli,
+        data,
         "create_market_data_client",
         fake_create_market_data_client,
     )
@@ -316,8 +319,8 @@ def test_train_model_cli_allows_ibkr_overrides(
         training_max_snapshots=5,
         training_snapshot_interval=2.0,
     )
-    monkeypatch.setattr(cli, "load_config", lambda: config)
-    monkeypatch.setattr(cli, "setup_logging", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(data, "load_config", lambda: config)
+    monkeypatch.setattr(utils, "setup_logging", lambda *_args, **_kwargs: None)
 
     captured_kwargs: dict[str, object] = {}
 
@@ -332,7 +335,7 @@ def test_train_model_cli_allows_ibkr_overrides(
         )
         return model_path
 
-    monkeypatch.setattr(cli, "train_linear_industry_model", fake_train)
+    monkeypatch.setattr(data, "train_linear_industry_model", fake_train)
 
     source_closed = {"value": False}
 
@@ -363,7 +366,7 @@ def test_train_model_cli_allows_ibkr_overrides(
         )
         return object(), DummySource()
 
-    monkeypatch.setattr(cli, "create_market_data_client", fake_create)
+    monkeypatch.setattr(data, "create_market_data_client", fake_create)
 
     result = runner.invoke(
         cli.app,
@@ -406,11 +409,11 @@ def test_train_model_cli_rejects_unknown_source(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     config = IBKRConfig(trading_mode=TradingMode.PAPER)
-    monkeypatch.setattr(cli, "load_config", lambda: config)
-    monkeypatch.setattr(cli, "setup_logging", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(data, "load_config", lambda: config)
+    monkeypatch.setattr(utils, "setup_logging", lambda *_args, **_kwargs: None)
 
     monkeypatch.setattr(
-        cli,
+        data,
         "train_linear_industry_model",
         lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("should not train")),
     )
@@ -444,8 +447,8 @@ def test_cache_option_chain_cli_invokes_client(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     config = IBKRConfig(trading_mode=TradingMode.PAPER)
-    monkeypatch.setattr(cli, "load_config", lambda: config)
-    monkeypatch.setattr(cli, "setup_logging", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(data, "load_config", lambda: config)
+    monkeypatch.setattr(utils, "setup_logging", lambda *_args, **_kwargs: None)
 
     captured_create: dict[str, object] = {}
 
@@ -486,7 +489,7 @@ def test_cache_option_chain_cli_invokes_client(
         )
         return DummyOptionClient(), DummySource()
 
-    monkeypatch.setattr(cli, "create_option_chain_client", fake_create_option_chain_client)
+    monkeypatch.setattr(data, "create_option_chain_client", fake_create_option_chain_client)
 
     result = runner.invoke(
         cli.app,
@@ -515,8 +518,8 @@ def test_cache_option_chain_cli_invokes_client(
 def test_diagnostics_command(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     config = IBKRConfig(trading_mode=TradingMode.PAPER)
     config.training_cache_dir = tmp_path / "cache"
-    monkeypatch.setattr(cli, "load_config", lambda: config)
-    monkeypatch.setattr(cli, "setup_logging", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(monitoring, "load_config", lambda: config)
+    monkeypatch.setattr(utils, "setup_logging", lambda *_args, **_kwargs: None)
 
     class DummyIBKRSource:
         def __init__(
@@ -531,7 +534,7 @@ def test_diagnostics_command(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) ->
         def rate_limit_usage(self) -> tuple[int, int]:
             return (5, self._limit)
 
-    monkeypatch.setattr(cli, "IBKRMarketDataSource", DummyIBKRSource)
+    monkeypatch.setattr(monitoring, "IBKRMarketDataSource", DummyIBKRSource)
 
     option_cache_dir = config.training_cache_dir / "option_chains"
     cache = OptionChainCacheStore(option_cache_dir)
@@ -559,16 +562,16 @@ def test_paper_quick_lists_presets() -> None:
 
 def test_paper_quick_uses_preset_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
     config = IBKRConfig(trading_mode=TradingMode.PAPER)
-    monkeypatch.setattr(cli, "load_config", lambda: config)
-    monkeypatch.setattr(cli, "setup_logging", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(trading, "load_config", lambda: config)
+    monkeypatch.setattr(utils, "setup_logging", lambda *_args, **_kwargs: None)
     dummy_broker = DummyBroker(config=config, guard=None)
     monkeypatch.setattr(
-        cli,
+        trading,
         "IBKRBroker",
         lambda config, guard, event_bus=None, risk_guard=None: dummy_broker,
     )
     monkeypatch.setattr(
-        cli, "MarketDataService", lambda event_bus: DummyMarketDataService(event_bus)
+        trading, "MarketDataService", lambda event_bus: DummyMarketDataService(event_bus)
     )
 
     result = runner.invoke(
@@ -585,8 +588,8 @@ def test_paper_quick_uses_preset_defaults(monkeypatch: pytest.MonkeyPatch) -> No
 
 def test_paper_quick_unknown_preset(monkeypatch: pytest.MonkeyPatch) -> None:
     config = IBKRConfig(trading_mode=TradingMode.PAPER)
-    monkeypatch.setattr(cli, "load_config", lambda: config)
-    monkeypatch.setattr(cli, "setup_logging", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(trading, "load_config", lambda: config)
+    monkeypatch.setattr(utils, "setup_logging", lambda *_args, **_kwargs: None)
 
     result = runner.invoke(
         cli.app,
@@ -602,8 +605,8 @@ def test_session_status_outputs_snapshot_and_telemetry(
     data_dir = tmp_path / "data"
     log_dir = tmp_path / "logs"
     config = IBKRConfig(data_dir=data_dir, log_dir=log_dir)
-    monkeypatch.setattr(cli, "load_config", lambda: config)
-    monkeypatch.setattr(cli, "setup_logging", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(monitoring, "load_config", lambda: config)
+    monkeypatch.setattr(utils, "setup_logging", lambda *_args, **_kwargs: None)
 
     snapshot_path = config.data_dir / DEFAULT_PORTFOLIO_SNAPSHOT.name
     snapshot_path.write_text(
