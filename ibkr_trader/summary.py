@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -37,7 +36,9 @@ def load_snapshot(path: Path) -> dict[str, Any] | None:
         return None
 
 
-def summarize_portfolio(snapshot: dict[str, Any] | None) -> tuple[str | None, str | None, str | None, int]:
+def summarize_portfolio(
+    snapshot: dict[str, Any] | None,
+) -> tuple[str | None, str | None, str | None, int]:
     if snapshot is None:
         return None, None, None, 0
     net_liq = snapshot.get("net_liquidation")
@@ -45,7 +46,12 @@ def summarize_portfolio(snapshot: dict[str, Any] | None) -> tuple[str | None, st
     buying_power = snapshot.get("buying_power")
     positions = snapshot.get("positions")
     total_positions = len(positions) if isinstance(positions, dict) else 0
-    return str(net_liq) if net_liq is not None else None, str(cash) if cash is not None else None, str(buying_power) if buying_power is not None else None, total_positions
+    return (
+        str(net_liq) if net_liq is not None else None,
+        str(cash) if cash is not None else None,
+        str(buying_power) if buying_power is not None else None,
+        total_positions,
+    )
 
 
 def summarize_run(snapshot_path: Path, telemetry_lines: list[str]) -> RunSummary:

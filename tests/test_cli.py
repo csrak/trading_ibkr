@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
+import json
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
-import json
 
 import pandas as pd
 import pytest
@@ -634,5 +634,5 @@ def test_session_status_outputs_snapshot_and_telemetry(
     result = runner.invoke(cli.app, ["session-status"])
 
     assert result.exit_code == 0, result.stdout
-    assert "Net Liquidation: 12345" in result.stdout
+    assert "NetLiq=12345" in result.stdout
     assert "cache nearing ttl" in result.stdout

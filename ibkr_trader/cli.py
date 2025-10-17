@@ -43,6 +43,7 @@ from ibkr_trader.strategy import (
     SimpleMovingAverageStrategy,
     SMAConfig,
 )
+from ibkr_trader.summary import summarize_run
 from ibkr_trader.telemetry import TelemetryReporter, build_telemetry_reporter
 from model.data import (
     FileCacheStore,
@@ -309,17 +310,13 @@ def session_status(
     typer.echo("=== Session Status ===")
     typer.echo(f"Snapshot file: {snapshot_path}")
 
-    snapshot = _load_portfolio_snapshot(snapshot_path)
-    if snapshot is None:
+    summary = summarize_run(snapshot_path, _tail_telemetry_entries(telemetry_file, tail or 100))
+    typer.echo(summary.headline())
+
+    if summary.raw_snapshot is None:
         typer.echo("Portfolio snapshot not available.")
     else:
-        net_liq = snapshot.get("net_liquidation")
-        cash = snapshot.get("total_cash")
-        buying_power = snapshot.get("buying_power")
-        typer.echo(
-            f"Net Liquidation: {net_liq} | Cash: {cash} | Buying Power: {buying_power}"
-        )
-        positions = snapshot.get("positions") or {}
+        positions = summary.raw_snapshot.get("positions") or {}
         if positions:
             typer.echo("Positions:")
             for symbol, details in positions.items():
@@ -330,12 +327,11 @@ def session_status(
 
     typer.echo("")
     typer.echo(f"Telemetry file: {telemetry_file}")
-    entries = _tail_telemetry_entries(telemetry_file, tail)
-    if not entries:
-        typer.echo("No telemetry entries found.")
+    if not summary.telemetry_warnings:
+        typer.echo("No recent telemetry warnings.")
     else:
-        typer.echo("Recent telemetry:")
-        for line in entries:
+        typer.echo("Recent telemetry warnings:")
+        for line in summary.telemetry_warnings:
             typer.echo(f"  {line}")
 
 
