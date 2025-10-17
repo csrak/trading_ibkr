@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-from abc import ABC, abstractmethod
+from abc import abstractmethod
 from collections import deque
 from contextlib import suppress
 from decimal import Decimal
@@ -12,6 +12,7 @@ from pathlib import Path
 from loguru import logger
 from pydantic import BaseModel, Field
 
+from ibkr_trader.base_strategy import BaseStrategy, BrokerProtocol
 from ibkr_trader.broker import IBKRBroker
 from ibkr_trader.events import EventBus, EventSubscription, EventTopic, MarketDataEvent
 from ibkr_trader.models import OrderRequest, OrderSide, OrderType, SymbolContract
@@ -27,17 +28,19 @@ class StrategyConfig(BaseModel):
     position_size: int = Field(default=10, description="Position size per trade")
 
 
-class Strategy(ABC):
-    """Base class for trading strategies.
+class Strategy(BaseStrategy):
+    """Base class for live trading strategies.
 
     Strategies subscribe to market data events via the shared event bus and
     react to incoming updates by implementing ``on_bar``.
+
+    This class extends BaseStrategy and adds event bus integration for live trading.
     """
 
     def __init__(
         self,
         config: StrategyConfig,
-        broker: IBKRBroker,
+        broker: BrokerProtocol,
         event_bus: EventBus,
         risk_guard: RiskGuard | None = None,
     ) -> None:
@@ -45,8 +48,9 @@ class Strategy(ABC):
 
         Args:
             config: Strategy configuration
-            broker: Broker interface
+            broker: Broker interface (IBKRBroker or SimulatedBroker)
             event_bus: Shared event bus for market/order events
+            risk_guard: Optional risk guard for position limits
         """
         self.config = config
         self.broker = broker
@@ -60,12 +64,13 @@ class Strategy(ABC):
         self._last_event: MarketDataEvent | None = None
 
     @abstractmethod
-    async def on_bar(self, symbol: str, price: Decimal) -> None:
+    async def on_bar(self, symbol: str, price: Decimal, broker: BrokerProtocol) -> None:
         """Process new price bar.
 
         Args:
             symbol: Trading symbol
             price: Current price
+            broker: Broker instance for order submission
         """
         pass
 
@@ -105,7 +110,7 @@ class Strategy(ABC):
                     event.price if isinstance(event.price, Decimal) else Decimal(str(event.price))
                 )
                 self._last_prices[symbol] = price
-                await self.on_bar(symbol, price)
+                await self.on_bar(symbol, price, self.broker)
         except asyncio.CancelledError:
             raise
 
@@ -118,11 +123,7 @@ class Strategy(ABC):
         Returns:
             Current position (positive=long, negative=short, 0=flat)
         """
-        positions = await self.broker.get_positions()
-        for pos in positions:
-            if pos.contract.symbol == symbol:
-                return pos.quantity
-        return 0
+        return await super().get_position(symbol, self.broker)
 
     def last_event(self) -> MarketDataEvent | None:
         return self._last_event
@@ -209,12 +210,13 @@ class SimpleMovingAverageStrategy(Strategy):
         recent_prices = list(prices)[-period:]
         return sum(recent_prices) / Decimal(str(period))
 
-    async def on_bar(self, symbol: str, price: Decimal) -> None:
+    async def on_bar(self, symbol: str, price: Decimal, broker: BrokerProtocol) -> None:
         """Process new price bar and generate signals.
 
         Args:
             symbol: Trading symbol
             price: Current price
+            broker: Broker instance for order submission
         """
         # Update price history
         if symbol not in self.price_history:
@@ -303,7 +305,14 @@ class IndustryModelStrategy(Strategy):
         prediction_series = self._artifact.load_predictions(artifact_path)
         self._prediction_map = {str(idx): value for idx, value in prediction_series.items()}
 
-    async def on_bar(self, symbol: str, price: Decimal) -> None:
+    async def on_bar(self, symbol: str, price: Decimal, broker: BrokerProtocol) -> None:
+        """Process new price bar using ML model predictions.
+
+        Args:
+            symbol: Trading symbol
+            price: Current price
+            broker: Broker instance for order submission
+        """
         event = self.last_event()
         if event is None or event.timestamp is None:
             return

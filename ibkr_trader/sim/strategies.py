@@ -4,11 +4,10 @@ from __future__ import annotations
 
 from decimal import Decimal
 
-from model.data.models import OrderBookSnapshot
-
+from ibkr_trader.base_strategy import BrokerProtocol
 from ibkr_trader.models import OrderRequest, OrderSide, OrderType, SymbolContract
-from ibkr_trader.sim.mock_broker import MockBroker
 from ibkr_trader.sim.runner import ReplayStrategy
+from model.data.models import OrderBookSnapshot
 
 
 class FixedSpreadMMStrategy(ReplayStrategy):
@@ -31,7 +30,7 @@ class FixedSpreadMMStrategy(ReplayStrategy):
         self.active_bid_id: int | None = None
         self.active_ask_id: int | None = None
 
-    async def on_order_book(self, snapshot: OrderBookSnapshot, broker: MockBroker) -> None:  # type: ignore[override]
+    async def on_order_book(self, snapshot: OrderBookSnapshot, broker: BrokerProtocol) -> None:
         if snapshot.symbol != self.symbol or not snapshot.levels:
             return
         best_bid = max(

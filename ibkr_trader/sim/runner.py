@@ -5,36 +5,21 @@ from __future__ import annotations
 import asyncio
 from contextlib import suppress
 
-from model.data.models import OptionSurfaceEntry, OrderBookSnapshot, TradeEvent
-
+from ibkr_trader.base_strategy import BaseStrategy
 from ibkr_trader.events import EventBus, EventSubscription, EventTopic
-from ibkr_trader.models import OrderSide
 from ibkr_trader.sim.events import EventLoader, ReplayEvent
 from ibkr_trader.sim.mock_broker import MockBroker
+from model.data.models import OptionSurfaceEntry, OrderBookSnapshot, TradeEvent
 
 
-class ReplayStrategy:
-    """Minimal strategy interface for replay simulations."""
+class ReplayStrategy(BaseStrategy):
+    """Strategy interface for replay simulations.
 
-    async def on_order_book(
-        self, snapshot: OrderBookSnapshot, broker: MockBroker
-    ) -> None:  # pragma: no cover - override in subclass
-        return None
+    Extends BaseStrategy to work with MockBroker in replay contexts.
+    Strategies can now be used in BOTH live/backtest AND replay simulations.
+    """
 
-    async def on_trade(
-        self, trade: TradeEvent, broker: MockBroker
-    ) -> None:  # pragma: no cover - override in subclass
-        return None
-
-    async def on_option_surface(
-        self, entry: OptionSurfaceEntry, broker: MockBroker
-    ) -> None:  # pragma: no cover - override in subclass
-        return None
-
-    async def on_fill(
-        self, side: OrderSide, quantity: int
-    ) -> None:  # pragma: no cover - override in subclass
-        return None
+    pass  # All methods inherited from BaseStrategy with default implementations
 
 
 class ReplayRunner:
@@ -64,6 +49,10 @@ class ReplayRunner:
                     await execution_task
 
     async def _dispatch(self, replay_event: ReplayEvent) -> None:
+        """Dispatch replay events to strategy callbacks.
+
+        The broker is passed to callbacks to enable order submission.
+        """
         payload = replay_event.payload
         if isinstance(payload, OrderBookSnapshot):
             await self.strategy.on_order_book(payload, self.broker)

@@ -5,10 +5,8 @@ from __future__ import annotations
 from collections import deque
 from statistics import fmean, pstdev
 
-from model.data.models import OptionSurfaceEntry, OrderBookSnapshot, TradeEvent
-
+from ibkr_trader.base_strategy import BrokerProtocol
 from ibkr_trader.models import OrderRequest, OrderSide, OrderType, SymbolContract
-from ibkr_trader.sim.mock_broker import MockBroker
 from ibkr_trader.sim.runner import ReplayStrategy
 from ibkr_trader.strategy_configs.config import (
     MeanReversionConfig,
@@ -18,6 +16,7 @@ from ibkr_trader.strategy_configs.config import (
     VolatilityOverlayConfig,
     VolSpilloverConfig,
 )
+from model.data.models import OptionSurfaceEntry, OrderBookSnapshot, TradeEvent
 
 
 class MeanReversionStrategy(ReplayStrategy):
@@ -36,7 +35,7 @@ class MeanReversionStrategy(ReplayStrategy):
         self.entry_price: float | None = None
         self.signals: list[str] = []
 
-    async def on_order_book(self, snapshot: OrderBookSnapshot, broker: MockBroker) -> None:  # type: ignore[override]
+    async def on_order_book(self, snapshot: OrderBookSnapshot, broker: BrokerProtocol) -> None:
         if snapshot.symbol != self.config.symbol:
             return
         if not snapshot.levels:
@@ -88,7 +87,7 @@ class MeanReversionStrategy(ReplayStrategy):
         else:
             self.position -= quantity
 
-    async def _open_position(self, broker: MockBroker, side: OrderSide, price: float) -> None:
+    async def _open_position(self, broker: BrokerProtocol, side: OrderSide, price: float) -> None:
         order = OrderRequest(
             contract=SymbolContract(symbol=self.config.symbol),
             side=side,
@@ -99,7 +98,7 @@ class MeanReversionStrategy(ReplayStrategy):
         await broker.submit_limit_order(order)
         self.entry_price = price
 
-    async def _close_position(self, broker: MockBroker, price: float, reason: str) -> None:
+    async def _close_position(self, broker: BrokerProtocol, price: float, reason: str) -> None:
         if self.position == 0:
             return
         side = OrderSide.SELL if self.position > 0 else OrderSide.BUY
@@ -123,7 +122,7 @@ class SkewArbitrageStrategy(ReplayStrategy):
         self.config = config
         self.opportunities: list[dict[str, float]] = []
 
-    async def on_option_surface(self, entry: OptionSurfaceEntry, broker: MockBroker) -> None:  # type: ignore[override]
+    async def on_option_surface(self, entry: OptionSurfaceEntry, broker: BrokerProtocol) -> None:
         if entry.symbol != self.config.symbol:
             return
         if self.config.execution.expiries and entry.expiry not in self.config.execution.expiries:
@@ -148,7 +147,7 @@ class MicrostructureMLStrategy(ReplayStrategy):
         self.predictions: list[float] = []
         self.signals: list[str] = []
 
-    async def on_order_book(self, snapshot: OrderBookSnapshot, broker: MockBroker) -> None:  # type: ignore[override]
+    async def on_order_book(self, snapshot: OrderBookSnapshot, broker: BrokerProtocol) -> None:
         if snapshot.symbol != self.config.symbol:
             return
         bid_volume = sum(level.size for level in snapshot.levels if level.side.value == "bid")
@@ -170,7 +169,7 @@ class RegimeRotationStrategy(ReplayStrategy):
         self.current_regime: str | None = None
         self.regime_history: list[str] = []
 
-    async def on_order_book(self, snapshot: OrderBookSnapshot, broker: MockBroker) -> None:  # type: ignore[override]
+    async def on_order_book(self, snapshot: OrderBookSnapshot, broker: BrokerProtocol) -> None:
         if snapshot.symbol != self.config.symbol:
             return
         if not snapshot.levels:
@@ -202,7 +201,7 @@ class VolSpilloverStrategy(ReplayStrategy):
         }
         self.alerts: list[tuple[list[str], float]] = []
 
-    async def on_order_book(self, snapshot: OrderBookSnapshot, broker: MockBroker) -> None:  # type: ignore[override]
+    async def on_order_book(self, snapshot: OrderBookSnapshot, broker: BrokerProtocol) -> None:
         if snapshot.symbol not in self.price_history:
             return
         if not snapshot.levels:
@@ -211,7 +210,7 @@ class VolSpilloverStrategy(ReplayStrategy):
         self.price_history[snapshot.symbol].append(mid)
         self._evaluate_pairs()
 
-    async def on_trade(self, trade: TradeEvent, broker: MockBroker) -> None:  # type: ignore[override]
+    async def on_trade(self, trade: TradeEvent, broker: BrokerProtocol) -> None:
         if trade.symbol in self.price_history:
             self.price_history[trade.symbol].append(trade.price)
             self._evaluate_pairs()
@@ -240,7 +239,7 @@ class VolatilityOverlayStrategy(ReplayStrategy):
         self.position = 0
         self.target_history: list[int] = []
 
-    async def on_order_book(self, snapshot: OrderBookSnapshot, broker: MockBroker) -> None:  # type: ignore[override]
+    async def on_order_book(self, snapshot: OrderBookSnapshot, broker: BrokerProtocol) -> None:
         if snapshot.symbol != self.config.symbol:
             return
         if not snapshot.levels:
