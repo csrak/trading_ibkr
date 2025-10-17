@@ -66,6 +66,33 @@ async def test_connect_marks_broker_connected() -> None:
 
 
 @pytest.mark.asyncio
+async def test_connect_passes_timeout_to_ib_directly() -> None:
+    """Regression test: ensure we don't wrap connectAsync in asyncio.wait_for().
+
+    Previously, wrapping ib.connectAsync() in asyncio.wait_for() caused
+    CancelledError due to event loop conflicts with ib_insync. The timeout
+    should be passed directly to connectAsync() instead.
+    """
+    config = IBKRConfig(host="192.168.112.1", port=7497, client_id=92)
+    guard = LiveTradingGuard(config=config)
+    ib_mock = _make_ib_mock()
+
+    broker = IBKRBroker(config=config, guard=guard, ib_client=ib_mock)
+
+    # Test with custom timeout
+    await broker.connect(timeout=15.0)
+
+    # Verify connectAsync was called with timeout parameter directly
+    ib_mock.connectAsync.assert_awaited_once_with(
+        host="192.168.112.1",
+        port=7497,
+        clientId=92,
+        timeout=15.0,
+    )
+    assert broker.is_connected
+
+
+@pytest.mark.asyncio
 async def test_place_order_qualifies_contract_and_waits_for_ack() -> None:
     config = IBKRConfig()
     guard = LiveTradingGuard(config=config)
