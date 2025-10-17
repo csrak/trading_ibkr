@@ -378,11 +378,12 @@ See `docs/strategy_quick_start.md` for templates:
 
 ## Resources
 
-- **Strategy Guide:** `docs/unified_strategy_guide.md`
-- **Quick Start:** `docs/strategy_quick_start.md`
-- **Order Book:** `docs/order_book_implementation.md`
-- **Model Training:** `docs/model_training_guide.md`
-- **Repository Guide:** `CLAUDE.md`
+- **Monitoring Guide:** `docs/monitoring_guide.md` - Real-time dashboard and session analysis
+- **Strategy Guide:** `docs/unified_strategy_guide.md` - Complete strategy development
+- **Quick Start:** `docs/strategy_quick_start.md` - Strategy templates
+- **Order Book:** `docs/order_book_implementation.md` - L2 market depth
+- **Model Training:** `docs/model_training_guide.md` - ML model workflows
+- **Repository Guide:** `CLAUDE.md` - Development reference
 
 ## Support
 

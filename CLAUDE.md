@@ -85,7 +85,8 @@ The codebase follows a clean, event-driven architecture with clear separation of
    - `IndustryModelStrategy` - ML-based strategy using pre-trained artifacts
 
 8. **CLI (`cli.py`)** - Typer-based commands:
-   - `ibkr-trader run` - Execute live strategy
+   - `ibkr-trader run` - Execute live strategy (with graceful shutdown)
+   - `ibkr-trader dashboard` - Real-time P&L and position monitoring
    - `ibkr-trader status` - Connection and account check
    - `ibkr-trader paper-order` - Single paper order (with `--preview` support)
    - `ibkr-trader paper-quick` - Preset-based quick trades
@@ -93,7 +94,7 @@ The codebase follows a clean, event-driven architecture with clear separation of
    - `ibkr-trader train-model` - Train ML models
    - `ibkr-trader cache-option-chain` - Cache option data
    - `ibkr-trader diagnostics` - Cache and rate limit info
-   - `ibkr-trader session-status` - Portfolio snapshot
+   - `ibkr-trader session-status` - Portfolio snapshot with trade metrics
    - `ibkr-trader monitor-telemetry` - Watch telemetry stream
 
 ### Supporting Modules
@@ -276,4 +277,7 @@ Training (optional):
 ## Additional Resources
 
 - [Quick Start Guide](QUICKSTART.md) - Installation and first trades
+- [Monitoring Guide](docs/monitoring_guide.md) - Real-time dashboards and session analysis
 - [Model Training Guide](docs/model_training_guide.md) - Data caching and ML workflows
+- [Strategy Guide](docs/unified_strategy_guide.md) - Complete strategy development reference
+- [Order Book Implementation](docs/order_book_implementation.md) - L2 market depth integration
