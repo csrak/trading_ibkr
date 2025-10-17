@@ -4,10 +4,11 @@ from __future__ import annotations
 
 from decimal import Decimal
 
+from model.data.models import OrderBookSnapshot
+
 from ibkr_trader.models import OrderRequest, OrderSide, OrderType, SymbolContract
 from ibkr_trader.sim.mock_broker import MockBroker
 from ibkr_trader.sim.runner import ReplayStrategy
-from model.data.models import OrderBookSnapshot
 
 
 class FixedSpreadMMStrategy(ReplayStrategy):

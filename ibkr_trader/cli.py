@@ -10,6 +10,18 @@ from pathlib import Path
 import pandas as pd
 import typer
 from loguru import logger
+from model.data import (
+    FileCacheStore,
+    IBKRMarketDataSource,
+    IBKROptionChainSource,
+    MarketDataClient,
+    OptionChainCacheStore,
+    OptionChainClient,
+    OptionChainRequest,
+    SnapshotLimitError,
+    YFinanceMarketDataSource,
+    YFinanceOptionChainSource,
+)
 
 from ibkr_trader.backtest.engine import BacktestEngine
 from ibkr_trader.broker import IBKRBroker
@@ -33,18 +45,6 @@ from ibkr_trader.strategy import (
     IndustryModelStrategy,
     SimpleMovingAverageStrategy,
     SMAConfig,
-)
-from model.data import (
-    FileCacheStore,
-    IBKRMarketDataSource,
-    IBKROptionChainSource,
-    MarketDataClient,
-    OptionChainCacheStore,
-    OptionChainClient,
-    OptionChainRequest,
-    SnapshotLimitError,
-    YFinanceMarketDataSource,
-    YFinanceOptionChainSource,
 )
 from model.training.industry_model import train_linear_industry_model
 

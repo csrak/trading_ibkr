@@ -8,12 +8,12 @@ from types import SimpleNamespace
 
 import pandas as pd
 import pytest
+from model.data.options import OptionChain
 from typer.testing import CliRunner
 
 from ibkr_trader import cli
 from ibkr_trader.config import IBKRConfig, TradingMode
 from ibkr_trader.models import OrderRequest, OrderResult, OrderStatus
-from model.data.options import OptionChain
 
 runner = CliRunner()
 

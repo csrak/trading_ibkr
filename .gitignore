@@ -52,11 +52,10 @@ dmypy.json
 .env.local
 
 # Project specific
-data/
-model/
-model/data/
-model/data/**
-logs/
+/data/
+/logs/
+/model/artifacts/
+/model/artifacts/**
 *.log
 
 # macOS

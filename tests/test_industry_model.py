@@ -8,9 +8,9 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 import pytest
-
 from model.data.client import MarketDataClient
 from model.data.market_data import MarketDataSource, PriceBarRequest
+
 from model.inference.price_predictor import LinearIndustryArtifact, predict_price
 from model.training import industry_model
 

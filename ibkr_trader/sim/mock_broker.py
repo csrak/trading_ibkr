@@ -6,6 +6,9 @@ import asyncio
 from datetime import UTC, datetime
 from decimal import Decimal
 
+from model.data.models import OrderStateSnapshot
+from model.data.models import OrderStatus as MMOrderStatus
+
 from ibkr_trader.events import EventBus, EventTopic, ExecutionEvent, OrderStatusEvent
 from ibkr_trader.models import (
     OrderRequest,
@@ -15,8 +18,6 @@ from ibkr_trader.models import (
     OrderType,
     SymbolContract,
 )
-from model.data.models import OrderStateSnapshot
-from model.data.models import OrderStatus as MMOrderStatus
 
 
 class MockBroker:

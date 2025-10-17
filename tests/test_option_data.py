@@ -8,7 +8,6 @@ from types import SimpleNamespace
 
 import pandas as pd
 import pytest
-
 from model.data.options import (
     OptionChain,
     OptionChainCacheStore,

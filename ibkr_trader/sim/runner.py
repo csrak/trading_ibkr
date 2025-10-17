@@ -5,11 +5,12 @@ from __future__ import annotations
 import asyncio
 from contextlib import suppress
 
+from model.data.models import OptionSurfaceEntry, OrderBookSnapshot, TradeEvent
+
 from ibkr_trader.events import EventBus, EventSubscription, EventTopic
 from ibkr_trader.models import OrderSide
 from ibkr_trader.sim.events import EventLoader, ReplayEvent
 from ibkr_trader.sim.mock_broker import MockBroker
-from model.data.models import OptionSurfaceEntry, OrderBookSnapshot, TradeEvent
 
 
 class ReplayStrategy:

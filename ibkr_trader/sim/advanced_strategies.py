@@ -5,6 +5,8 @@ from __future__ import annotations
 from collections import deque
 from statistics import fmean, pstdev
 
+from model.data.models import OptionSurfaceEntry, OrderBookSnapshot, TradeEvent
+
 from ibkr_trader.models import OrderRequest, OrderSide, OrderType, SymbolContract
 from ibkr_trader.sim.mock_broker import MockBroker
 from ibkr_trader.sim.runner import ReplayStrategy
@@ -16,7 +18,6 @@ from ibkr_trader.strategy_configs.config import (
     VolatilityOverlayConfig,
     VolSpilloverConfig,
 )
-from model.data.models import OptionSurfaceEntry, OrderBookSnapshot, TradeEvent
 
 
 class MeanReversionStrategy(ReplayStrategy):

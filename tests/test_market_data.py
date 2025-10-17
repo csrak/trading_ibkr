@@ -7,7 +7,6 @@ from pathlib import Path
 
 import pandas as pd
 import pytest
-
 from model.data.cache_store import FileCacheStore
 from model.data.client import MarketDataClient
 from model.data.market_data import MarketDataSource, PriceBarRequest

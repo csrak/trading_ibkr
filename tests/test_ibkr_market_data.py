@@ -6,7 +6,6 @@ from datetime import UTC, datetime
 from types import SimpleNamespace
 
 import pytest
-
 from model.data.ibkr import IBKRMarketDataSource, IBKROptionChainSource, SnapshotLimitError
 from model.data.market_data import PriceBarRequest
 from model.data.options import OptionChainRequest

@@ -9,6 +9,7 @@ from pathlib import Path
 
 import pandas as pd
 import pytest
+from model.data.models import OrderBookSnapshot
 
 from ibkr_trader.events import EventBus, EventTopic, ExecutionEvent
 from ibkr_trader.models import OrderRequest, OrderSide, OrderStatus, OrderType, SymbolContract
@@ -16,7 +17,6 @@ from ibkr_trader.sim.events import EventLoader
 from ibkr_trader.sim.mock_broker import MockBroker
 from ibkr_trader.sim.runner import ReplayRunner, ReplayStrategy
 from ibkr_trader.sim.strategies import FixedSpreadMMStrategy
-from model.data.models import OrderBookSnapshot
 
 
 def _write_csv(path: Path, frame: pd.DataFrame) -> None:
