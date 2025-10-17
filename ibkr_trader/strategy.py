@@ -13,7 +13,6 @@ from loguru import logger
 from pydantic import BaseModel, Field
 
 from ibkr_trader.base_strategy import BaseStrategy, BrokerProtocol
-from ibkr_trader.broker import IBKRBroker
 from ibkr_trader.events import EventBus, EventSubscription, EventTopic, MarketDataEvent
 from ibkr_trader.models import OrderRequest, OrderSide, OrderType, SymbolContract
 from ibkr_trader.portfolio import RiskGuard
@@ -173,7 +172,7 @@ class SimpleMovingAverageStrategy(Strategy):
     def __init__(
         self,
         config: SMAConfig,
-        broker: IBKRBroker,
+        broker: BrokerProtocol,
         event_bus: EventBus,
         risk_guard: RiskGuard | None = None,
     ) -> None:
@@ -294,7 +293,7 @@ class IndustryModelStrategy(Strategy):
     def __init__(
         self,
         config: IndustryModelConfig,
-        broker: IBKRBroker,
+        broker: BrokerProtocol,
         event_bus: EventBus,
         risk_guard: RiskGuard | None = None,
     ) -> None:

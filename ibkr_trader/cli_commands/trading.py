@@ -693,7 +693,7 @@ def run(
     2. Pass --live flag
     3. Acknowledge the risk when prompted
     """
-    from ibkr_trader.cli_commands.utils import emit_run_summary, format_seconds, setup_logging
+    from ibkr_trader.cli_commands.utils import format_seconds, setup_logging
 
     # Load config
     config = load_config()

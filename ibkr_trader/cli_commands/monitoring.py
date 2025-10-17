@@ -3,7 +3,6 @@
 import asyncio
 import time
 from decimal import Decimal
-from pathlib import Path
 
 import typer
 from loguru import logger
