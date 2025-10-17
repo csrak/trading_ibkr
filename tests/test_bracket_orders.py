@@ -1,7 +1,8 @@
 """Tests for bracket order functionality."""
 
-import pytest
 from decimal import Decimal
+
+import pytest
 
 from ibkr_trader.models import (
     BracketOrderRequest,
@@ -306,10 +307,13 @@ class TestBracketOrderBroker:
     async def test_place_bracket_order_creates_three_orders(self) -> None:
         """Test that bracket order creates parent and two child orders."""
         from unittest.mock import AsyncMock, MagicMock, Mock
+
+        from ib_insync import Contract, Order, Trade
+        from ib_insync import OrderStatus as IBOrderStatus
+
         from ibkr_trader.broker import IBKRBroker
         from ibkr_trader.config import IBKRConfig, TradingMode
         from ibkr_trader.safety import LiveTradingGuard
-        from ib_insync import Contract, Order, Trade, OrderStatus as IBOrderStatus
 
         config = IBKRConfig(
             trading_mode=TradingMode.PAPER,
@@ -355,10 +359,9 @@ class TestBracketOrderBroker:
             order_call_count += 1
             if order_call_count == 1:
                 return parent_trade
-            elif order_call_count == 2:
+            if order_call_count == 2:
                 return stop_trade
-            else:
-                return take_profit_trade
+            return take_profit_trade
 
         mock_ib.placeOrder = Mock(side_effect=mock_place_order)
 
@@ -410,10 +413,11 @@ class TestBracketOrderBroker:
     @pytest.mark.asyncio
     async def test_bracket_order_respects_safety_guards(self) -> None:
         """Test that bracket orders go through safety validation."""
-        from unittest.mock import AsyncMock, MagicMock
+        from unittest.mock import MagicMock
+
         from ibkr_trader.broker import IBKRBroker
         from ibkr_trader.config import IBKRConfig, TradingMode
-        from ibkr_trader.safety import LiveTradingGuard, LiveTradingError
+        from ibkr_trader.safety import LiveTradingError, LiveTradingGuard
 
         config = IBKRConfig(
             trading_mode=TradingMode.PAPER,
@@ -467,10 +471,13 @@ class TestBracketOrderBroker:
     async def test_bracket_order_sets_parent_child_relationships(self) -> None:
         """Test that child orders have parentId set correctly."""
         from unittest.mock import AsyncMock, MagicMock, Mock
+
+        from ib_insync import Contract, Order, Trade
+        from ib_insync import OrderStatus as IBOrderStatus
+
         from ibkr_trader.broker import IBKRBroker
         from ibkr_trader.config import IBKRConfig, TradingMode
         from ibkr_trader.safety import LiveTradingGuard
-        from ib_insync import Contract, Order, Trade, OrderStatus as IBOrderStatus
 
         config = IBKRConfig(
             trading_mode=TradingMode.PAPER,
@@ -512,10 +519,9 @@ class TestBracketOrderBroker:
             placed_orders.append(order)
             if len(placed_orders) == 1:
                 return parent_trade
-            elif len(placed_orders) == 2:
+            if len(placed_orders) == 2:
                 return stop_trade
-            else:
-                return take_profit_trade
+            return take_profit_trade
 
         mock_ib.placeOrder = Mock(side_effect=mock_place_order)
 
