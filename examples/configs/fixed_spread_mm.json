@@ -1,0 +1,22 @@
+{
+  "name": "Market Maker AAPL",
+  "strategy_type": "fixed_spread_mm",
+  "symbol": "AAPL",
+  "data": {
+    "order_book": ["AAPL"],
+    "trades": [],
+    "option_surface": []
+  },
+  "execution": {
+    "spread": 0.10,
+    "quote_size": 1,
+    "inventory_limit": 5,
+    "skew_factor": 0.01
+  },
+  "risk": {
+    "inventory_limit": 5,
+    "max_drawdown": 0.03,
+    "kill_switch": true,
+    "max_daily_loss": 500
+  }
+}

@@ -1,0 +1,23 @@
+{
+  "name": "Mean Reversion AAPL",
+  "strategy_type": "mean_reversion",
+  "symbol": "AAPL",
+  "data": {
+    "order_book": [],
+    "trades": [],
+    "option_surface": []
+  },
+  "execution": {
+    "lookback_short": 20,
+    "lookback_long": 60,
+    "entry_zscore": 2.0,
+    "exit_zscore": 0.5,
+    "stop_multiple": 2.0,
+    "position_size": 10
+  },
+  "risk": {
+    "inventory_limit": 10,
+    "max_drawdown": 0.05,
+    "kill_switch": true
+  }
+}

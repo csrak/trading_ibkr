@@ -1,0 +1,22 @@
+{
+  "name": "Industry Model AAPL",
+  "strategy_type": "industry_model",
+  "symbol": "AAPL",
+  "data": {
+    "order_book": [],
+    "trades": [],
+    "option_surface": []
+  },
+  "execution": {
+    "model_artifact_path": "model/artifacts/aapl_model/AAPL_linear_model.json",
+    "entry_threshold": 0.01,
+    "exit_threshold": 0.005,
+    "position_size": 10,
+    "max_hold_days": 5
+  },
+  "risk": {
+    "inventory_limit": 10,
+    "max_drawdown": 0.05,
+    "kill_switch": true
+  }
+}
