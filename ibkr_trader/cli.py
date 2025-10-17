@@ -739,7 +739,9 @@ async def run_strategy(
                 await asyncio.sleep(MARKET_DATA_IDLE_SLEEP_SECONDS)
 
     except KeyboardInterrupt:
-        logger.info("Shutting down gracefully...")
+        logger.info("=" * 70)
+        logger.warning("SHUTDOWN INITIATED BY USER")
+        logger.info("=" * 70)
     except Exception as e:
         logger.error(f"Error during execution: {e}")
         raise
@@ -758,9 +760,78 @@ async def run_strategy(
             diagnostic_task.cancel()
             with suppress(asyncio.CancelledError):
                 await diagnostic_task
+
+        # Display final summary before disconnecting
+        await _emit_shutdown_summary(
+            config=config,
+            portfolio=portfolio,
+            broker=broker,
+            run_label=run_label,
+        )
+
         await broker.disconnect()
         _emit_run_summary(config=config, telemetry=telemetry, label=run_label)
         logger.info("Strategy stopped")
+
+
+async def _emit_shutdown_summary(
+    config: "IBKRConfig",  # noqa: F821
+    portfolio: PortfolioState,
+    broker: IBKRBroker,
+    run_label: str,
+) -> None:
+    """Display final summary on shutdown with position warnings."""
+    logger.info("")
+    logger.info("=" * 70)
+    logger.info("FINAL SESSION SUMMARY")
+    logger.info("=" * 70)
+
+    # Get final positions
+    try:
+        positions = await broker.get_positions()
+        await portfolio.update_positions(positions)
+    except Exception as e:  # pragma: no cover - best effort
+        logger.warning(f"Could not fetch final positions: {e}")
+        positions = []
+
+    # Display P&L
+    realized_pnl = await portfolio.realized_pnl()
+    per_symbol_pnl = await portfolio.per_symbol_pnl()
+    trade_stats = await portfolio.trade_statistics()
+
+    logger.info(f"Realized P&L: ${realized_pnl}")
+    logger.info(f"Total Fills: {trade_stats.get('fills', '0')}")
+
+    if per_symbol_pnl:
+        logger.info("")
+        logger.info("Per-Symbol P&L:")
+        for symbol, pnl in per_symbol_pnl.items():
+            logger.info(f"  {symbol}: ${pnl}")
+
+    # Check for open positions
+    if positions:
+        logger.warning("")
+        logger.warning("⚠ OPEN POSITIONS DETECTED ⚠")
+        logger.warning("")
+        logger.warning("You have %d open position(s):", len(positions))
+        for pos in positions:
+            qty = pos.quantity
+            symbol = pos.contract.symbol
+            avg_price = pos.avg_price
+            unrealized = pos.unrealized_pnl
+            pnl_sign = "+" if unrealized >= 0 else ""
+            logger.warning(
+                f"  {symbol}: {qty:+d} shares @ ${avg_price:.2f} | "
+                f"Unrealized P&L: {pnl_sign}${unrealized:.2f}"
+            )
+        logger.warning("")
+        logger.warning("Remember to close these positions if needed!")
+    else:
+        logger.info("")
+        logger.info("✓ All positions closed")
+
+    logger.info("=" * 70)
+    logger.info("")
 
 
 async def submit_single_order(

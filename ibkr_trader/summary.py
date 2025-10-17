@@ -20,13 +20,21 @@ class RunSummary:
     recommended_actions: list[str]
     trade_stats: dict[str, str]
     raw_snapshot: dict[str, Any] | None
+    win_rate: float | None = None
+    total_trades: int | None = None
+    avg_pnl_per_trade: float | None = None
 
     def headline(self) -> str:
-        return (
-            f"NetLiq={self.net_liquidation or 'n/a'} | "
-            f"Cash={self.cash or 'n/a'} | "
-            f"Positions={self.total_positions}"
-        )
+        parts = [
+            f"NetLiq={self.net_liquidation or 'n/a'}",
+            f"Cash={self.cash or 'n/a'}",
+            f"Positions={self.total_positions}",
+        ]
+        if self.total_trades is not None and self.total_trades > 0:
+            parts.append(f"Trades={self.total_trades}")
+        if self.win_rate is not None:
+            parts.append(f"WinRate={self.win_rate:.1%}")
+        return " | ".join(parts)
 
 
 def load_snapshot(path: Path) -> dict[str, Any] | None:
@@ -62,6 +70,28 @@ def summarize_run(snapshot_path: Path, telemetry_lines: list[str]) -> RunSummary
     warnings = [line for line in telemetry_lines if "WARNING" in line or "ERROR" in line]
     actions = infer_actions(snapshot, warnings)
     trade_stats = extract_trade_stats(snapshot)
+
+    # Calculate trade metrics
+    win_rate = None
+    total_trades = None
+    avg_pnl = None
+
+    if snapshot:
+        fills = snapshot.get("trade_stats", {}).get("fills")
+        if fills and fills != "0":
+            total_trades = int(float(fills))
+
+        symbol_pnl = snapshot.get("symbol_pnl", {})
+        if symbol_pnl and isinstance(symbol_pnl, dict):
+            winning_symbols = sum(1 for pnl in symbol_pnl.values() if float(pnl) > 0)
+            total_symbols = len(symbol_pnl)
+            if total_symbols > 0:
+                win_rate = winning_symbols / total_symbols
+
+            realized_pnl = snapshot.get("realized_pnl")
+            if realized_pnl and total_trades and total_trades > 0:
+                avg_pnl = float(realized_pnl) / total_trades
+
     return RunSummary(
         net_liquidation=net_liq,
         cash=cash,
@@ -71,6 +101,9 @@ def summarize_run(snapshot_path: Path, telemetry_lines: list[str]) -> RunSummary
         recommended_actions=actions,
         trade_stats=trade_stats,
         raw_snapshot=snapshot,
+        win_rate=win_rate,
+        total_trades=total_trades,
+        avg_pnl_per_trade=avg_pnl,
     )
 
 
