@@ -202,6 +202,61 @@ class BracketOrderRequest(BaseModel):
         return v
 
 
+class TrailingStopConfig(BaseModel):
+    """Trailing stop configuration.
+
+    A trailing stop automatically adjusts the stop loss price as the market price
+    moves favorably. For long positions, the stop loss rises with price increases.
+    For short positions, the stop loss lowers with price decreases.
+
+    The stop loss never moves against the position (never widens).
+    """
+
+    symbol: str = Field(..., description="Trading symbol")
+    side: OrderSide = Field(..., description="SELL for long position, BUY for short position")
+    quantity: Annotated[int, Field(gt=0, description="Position quantity")]
+    trail_amount: Decimal | None = Field(
+        default=None, description="Trailing amount in dollars (e.g., $5.00)"
+    )
+    trail_percent: Decimal | None = Field(
+        default=None, description="Trailing percentage (e.g., 2.0 for 2%)"
+    )
+    activation_price: Decimal | None = Field(
+        default=None, description="Optional activation threshold (start trailing above this price)"
+    )
+
+    @field_validator("symbol")
+    @classmethod
+    def validate_symbol(cls, v: str) -> str:
+        """Ensure symbol is uppercase and non-empty."""
+        if not v:
+            raise ValueError("Symbol cannot be empty")
+        return v.upper().strip()
+
+    @field_validator("trail_amount")
+    @classmethod
+    def validate_trail_amount_exclusive(
+        cls, v: Decimal | None, info: ValidationInfo
+    ) -> Decimal | None:
+        """Ensure exactly one of trail_amount or trail_percent is set."""
+        trail_percent = info.data.get("trail_percent")
+        if v is None and trail_percent is None:
+            raise ValueError("Either trail_amount or trail_percent must be specified")
+        if v is not None and trail_percent is not None:
+            raise ValueError("Cannot specify both trail_amount and trail_percent")
+        if v is not None and v <= 0:
+            raise ValueError(f"trail_amount must be positive, got {v}")
+        return v
+
+    @field_validator("trail_percent")
+    @classmethod
+    def validate_trail_percent(cls, v: Decimal | None) -> Decimal | None:
+        """Validate trail_percent is in valid range."""
+        if v is not None and (v <= 0 or v >= 100):
+            raise ValueError(f"trail_percent must be between 0 and 100, got {v}")
+        return v
+
+
 class MarketData(BaseModel):
     """Real-time market data."""
 

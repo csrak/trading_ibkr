@@ -32,6 +32,7 @@ from ibkr_trader.models import (
     OrderSide,
     OrderType,
     SymbolContract,
+    TrailingStopConfig,
 )
 from ibkr_trader.portfolio import PortfolioState, RiskGuard
 from ibkr_trader.presets import get_preset, preset_names
@@ -632,6 +633,193 @@ async def submit_bracket_order(
             logger.info(f"Stop Loss: {stop_loss_price}")
             logger.info(f"Take Profit: {take_profit_price}")
     finally:
+        await broker.disconnect()
+
+
+@trading_app.command("trailing-stop")
+def trailing_stop_command(
+    symbol: str = typer.Option(..., "--symbol", "-s", help="Symbol to trail"),
+    side: OrderSide = typer.Option(
+        OrderSide.SELL,
+        "--side",
+        "-d",
+        help="Stop order side (SELL for long position, BUY for short position)",
+    ),
+    quantity: int = typer.Option(
+        1,
+        "--quantity",
+        "-q",
+        min=1,
+        help="Position quantity",
+    ),
+    trail_amount: str | None = typer.Option(
+        None,
+        "--trail-amount",
+        help="Trailing amount in dollars (e.g., 5.00)",
+    ),
+    trail_percent: str | None = typer.Option(
+        None,
+        "--trail-percent",
+        help="Trailing percentage (e.g., 2.0 for 2%)",
+    ),
+    activation_price: str | None = typer.Option(
+        None,
+        "--activation-price",
+        help="Optional activation threshold (start trailing above this price)",
+    ),
+    initial_price: str = typer.Option(
+        ...,
+        "--initial-price",
+        help="Current market price for calculating initial stop",
+    ),
+) -> None:
+    """Create a trailing stop that adjusts dynamically as price moves favorably.
+
+    A trailing stop automatically adjusts the stop loss price as the market moves
+    in your favor. For long positions (SELL stop), the stop rises with price
+    increases. For short positions (BUY stop), the stop lowers with price decreases.
+
+    The stop never widens (moves against your position).
+
+    You must specify EITHER --trail-amount OR --trail-percent (not both).
+
+    Example (long position with $5 trailing amount):
+      ibkr-trader trailing-stop --symbol AAPL --side SELL --quantity 10 \\
+        --trail-amount 5.00 --initial-price 150.00
+
+    Example (short position with 2% trailing):
+      ibkr-trader trailing-stop --symbol AAPL --side BUY --quantity 10 \\
+        --trail-percent 2.0 --initial-price 150.00 --activation-price 145.00
+
+    NOTE: This command creates the trailing stop but does not monitor it.
+    You must run 'ibkr-trader run' or integrate TrailingStopManager in your strategy
+    to enable continuous monitoring and adjustment.
+    """
+    from ibkr_trader.cli_commands.utils import setup_logging
+
+    config = load_config()
+    setup_logging(config.log_dir, verbose=False)
+
+    if config.trading_mode != TradingMode.PAPER:
+        logger.error(
+            "trailing-stop command is restricted to PAPER trading mode. "
+            "Set IBKR_TRADING_MODE=paper before running this command."
+        )
+        raise typer.Exit(code=1)
+
+    # Validate mutually exclusive parameters
+    if trail_amount is None and trail_percent is None:
+        raise typer.BadParameter("Must specify either --trail-amount or --trail-percent")
+    if trail_amount is not None and trail_percent is not None:
+        raise typer.BadParameter("Cannot specify both --trail-amount and --trail-percent")
+
+    # Parse prices
+    try:
+        initial_price_decimal = Decimal(initial_price)
+        trail_amount_decimal: Decimal | None = (
+            Decimal(trail_amount) if trail_amount else None
+        )
+        trail_percent_decimal: Decimal | None = (
+            Decimal(trail_percent) if trail_percent else None
+        )
+        activation_price_decimal: Decimal | None = (
+            Decimal(activation_price) if activation_price else None
+        )
+    except (InvalidOperation, ValueError) as exc:
+        raise typer.BadParameter("Invalid price or percentage format") from exc
+
+    # Create trailing stop config
+    try:
+        config_obj = TrailingStopConfig(
+            symbol=symbol,
+            side=side,
+            quantity=quantity,
+            trail_amount=trail_amount_decimal,
+            trail_percent=trail_percent_decimal,
+            activation_price=activation_price_decimal,
+        )
+    except Exception as exc:
+        raise typer.BadParameter(f"Invalid trailing stop configuration: {exc}") from exc
+
+    # Create broker and trailing stop manager
+    guard = LiveTradingGuard(config=config, live_flag_enabled=False)
+    snapshot_path = config.data_dir / DEFAULT_PORTFOLIO_SNAPSHOT.name
+    portfolio = PortfolioState(
+        Decimal(str(config.max_daily_loss)),
+        snapshot_path=snapshot_path,
+    )
+    risk_guard = RiskGuard(
+        portfolio=portfolio,
+        max_exposure=Decimal(str(config.max_order_exposure)),
+    )
+    guard.acknowledge_live_trading()
+
+    try:
+        asyncio.run(
+            create_trailing_stop(
+                config=config,
+                guard=guard,
+                risk_guard=risk_guard,
+                trailing_config=config_obj,
+                initial_price=initial_price_decimal,
+            )
+        )
+    except Exception as exc:  # pragma: no cover - surface detailed CLI error
+        logger.error(f"Failed to create trailing stop: {exc}")
+        raise typer.Exit(code=1) from exc
+
+
+async def create_trailing_stop(
+    config: "IBKRConfig",  # noqa: F821
+    guard: LiveTradingGuard,
+    risk_guard: RiskGuard,
+    trailing_config: TrailingStopConfig,
+    initial_price: Decimal,
+) -> None:
+    """Create a trailing stop order."""
+    from ibkr_trader.trailing_stops import TrailingStopManager
+
+    event_bus = EventBus()
+    broker = IBKRBroker(config=config, guard=guard, event_bus=event_bus, risk_guard=risk_guard)
+    state_file = config.data_dir / "trailing_stops.json"
+    trailing_manager = TrailingStopManager(
+        broker=broker,
+        event_bus=event_bus,
+        state_file=state_file,
+    )
+
+    try:
+        await broker.connect()
+        await trailing_manager.start()
+
+        stop_id = await trailing_manager.create_trailing_stop(trailing_config, initial_price)
+
+        logger.info("=" * 70)
+        logger.info("TRAILING STOP CREATED")
+        logger.info("=" * 70)
+        logger.info(f"Stop ID: {stop_id}")
+        logger.info(f"Symbol: {trailing_config.symbol}")
+        logger.info(f"Side: {trailing_config.side.value}")
+        logger.info(f"Quantity: {trailing_config.quantity}")
+        if trailing_config.trail_amount:
+            logger.info(f"Trail Amount: ${trailing_config.trail_amount}")
+        else:
+            logger.info(f"Trail Percent: {trailing_config.trail_percent}%")
+        if trailing_config.activation_price:
+            logger.info(f"Activation Price: ${trailing_config.activation_price}")
+        logger.info("=" * 70)
+        logger.info("")
+        logger.warning(
+            "⚠ NOTE: This trailing stop has been created but will NOT be monitored "
+            "after this command exits."
+        )
+        logger.warning(
+            "To enable continuous monitoring and adjustment, you must run a strategy "
+            "that integrates TrailingStopManager, or use 'ibkr-trader run' with "
+            "appropriate configuration."
+        )
+    finally:
+        await trailing_manager.stop()
         await broker.disconnect()
 
 
