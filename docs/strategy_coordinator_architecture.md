@@ -189,6 +189,45 @@ Each phase should land in manageable PR-sized chunks (<400 LOC) with focused tes
 
 These will be resolved during implementation planning. For now, the coordinator will err on the side of conservative safety—halt on unhandled strategy exceptions and require explicit config for non-trivial capital policies.
 
+## Order Intent Channel (Design)
+
+To decouple strategies from direct `OrderRequest` creation, the coordinator will introduce a typed intent workflow:
+
+- **OrderIntent** dataclass (module `ibkr_trader/order_intents.py`)
+  - Fields: `strategy_id`, `symbol`, `intent_type` (`"target_position"` | `"market_delta"` initially), `quantity`, optional `side`, `timestamp`, and optional `metadata` dict.
+  - `intent_type="target_position"` expresses desired absolute exposure; coordinator computes delta vs. current position and issues an order if needed.
+  - `intent_type="market_delta"` issues an immediate delta trade (useful for legacy strategies in transition).
+
+- **Strategy API additions**
+  - `Strategy` base class gains helper `submit_target_position(symbol, target, metadata=None)` which publishes an `OrderIntent` to a coordinator-owned queue.
+  - Existing `place_market_order` remains for backward compatibility; default SMA strategy will migrate to `submit_target_position`.
+
+- **Coordinator processing**
+  - `StrategyCoordinator` hosts an internal async loop reading intents from an `asyncio.Queue`.
+  - Before forwarding to broker, coordinator:
+    1. Resolves current position via cached exposures.
+    2. Calculates desired delta (respecting envelopes), clips if needed, and emits telemetry on clip or final delta.
+    3. Delegates to existing `CoordinatorBrokerProxy` for risk validation + execution.
+  - Empty/zero deltas short-circuit with telemetry note (`coordinator.intent_ignored`).
+  - Signed exposure is cached per symbol; aggregate notional updates are sent to telemetry so `RiskGuard` can enforce portfolio-wide limits.
+
+- **Telemetry**
+  - `coordinator.intent_received` logs every intent with requested vs. resolved quantities.
+  - `coordinator.intent_fulfilled` confirms execution path (order id, delta).
+  - Clip warnings reuse existing `order_clipped` event types.
+
+- **Migration path**
+  1. Implement intent infrastructure alongside current order calls.
+  2. Migrate SMA strategy to intents (feature-flagged to allow rollback).
+  3. Audit other strategies and move them to target-position semantics.
+  4. Eventually demote direct broker access from strategies to guarded internal use only.
+
+- **Testing**
+  - Unit tests for intent queue handling, delta math (including envelope interactions), and telemetry assertions.
+  - Integration test: dummy strategy posts alternating target positions; verify resulting orders and exposures.
+
+This approach keeps strategy code focused on desired exposure while the coordinator centralizes safety, netting, and broker interactions.
+
 ## Configuration Sketch
 
 Initial Pydantic models (`ibkr_trader/strategy_configs/graph.py`):

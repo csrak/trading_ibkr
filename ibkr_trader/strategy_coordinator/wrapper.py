@@ -77,4 +77,19 @@ def build_strategy_wrapper(
         )
         return StrategyWrapper(id=node.id, node=node, impl=live_adapter)
 
+    # Fall back to registered strategy configs via factory
+    config_data: dict[str, object] = dict(node.params)
+    config_data.setdefault("name", node.id)
+    if node.symbols:
+        config_data.setdefault("symbol", node.symbols[0])
+    strategy_config = StrategyConfig.build_from_type(node.type, config_data)
+    replay_strategy = StrategyFactory.create(strategy_config)
+    live_adapter = ConfigBasedLiveStrategy(
+        impl=replay_strategy,
+        broker=broker,
+        event_bus=event_bus,
+        symbol=strategy_config.symbol,
+    )
+    return StrategyWrapper(id=node.id, node=node, impl=live_adapter)
+
     raise ValueError(f"Unsupported strategy node type '{node.type}'")

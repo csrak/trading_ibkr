@@ -9,7 +9,13 @@ import pytest
 
 from ibkr_trader.broker import IBKRBroker
 from ibkr_trader.events import EventBus
-from ibkr_trader.models import OrderResult, OrderSide, OrderStatus, SymbolContract, TrailingStopConfig
+from ibkr_trader.models import (
+    OrderResult,
+    OrderSide,
+    OrderStatus,
+    SymbolContract,
+    TrailingStopConfig,
+)
 from ibkr_trader.trailing_stops import TrailingStop, TrailingStopManager
 
 
@@ -18,7 +24,9 @@ def test_trailing_stop_config_requires_trail_amount_or_percent() -> None:
     from pydantic import ValidationError
 
     # Neither specified explicitly - should fail
-    with pytest.raises(ValidationError, match="Either trail_amount or trail_percent must be specified"):
+    with pytest.raises(
+        ValidationError, match="Either trail_amount or trail_percent must be specified"
+    ):
         TrailingStopConfig(
             symbol="AAPL",
             side=OrderSide.SELL,

@@ -1,13 +1,15 @@
 from __future__ import annotations
 
+import asyncio
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from datetime import UTC, datetime
 from decimal import Decimal
 
 import pytest
 
-from ibkr_trader.base_strategy import BrokerProtocol
-from ibkr_trader.events import EventBus
+from ibkr_trader.base_strategy import BaseStrategy, BrokerProtocol
+from ibkr_trader.events import EventBus, MarketDataEvent
 from ibkr_trader.market_data import SubscriptionRequest
 from ibkr_trader.models import (
     OrderRequest,
@@ -19,6 +21,7 @@ from ibkr_trader.models import (
     SymbolContract,
 )
 from ibkr_trader.strategy import SimpleMovingAverageStrategy
+from ibkr_trader.strategy_configs.config import StrategyConfig
 from ibkr_trader.strategy_configs.graph import StrategyGraphConfig, StrategyNodeConfig
 from ibkr_trader.strategy_coordinator.coordinator import (
     CoordinatorBrokerProxy,
@@ -193,3 +196,102 @@ async def test_broker_proxy_rejects_when_notional_allows_zero() -> None:
 
     with pytest.raises(CapitalAllocationError):
         await proxy.place_order(request)
+
+
+@pytest.mark.asyncio
+async def test_target_position_intent_executes(monkeypatch: pytest.MonkeyPatch) -> None:
+    event_bus = EventBus()
+    market_data = DummyMarketDataService()
+    broker = CaptureBroker()
+
+    coordinator = StrategyCoordinator(
+        broker=broker,
+        event_bus=event_bus,
+        market_data=market_data,  # type: ignore[arg-type]
+        risk_guard=None,
+        telemetry=None,
+        subscribe_market_data=False,
+    )
+
+    graph = StrategyGraphConfig(
+        strategies=[
+            StrategyNodeConfig(
+                id="sma1",
+                type="sma",
+                symbols=["AAPL"],
+                params={"fast_period": 5, "slow_period": 20, "position_size": 5},
+                max_position=5,
+            )
+        ]
+    )
+
+    await coordinator.start(graph)
+
+    try:
+        wrapper = coordinator.strategies["sma1"]
+        # Seed last event so price resolution succeeds
+        wrapper.impl._last_event = MarketDataEvent(  # type: ignore[attr-defined]
+            symbol="AAPL",
+            price=Decimal("150"),
+            timestamp=datetime.now(UTC),
+        )
+        wrapper.impl._last_prices["AAPL"] = Decimal("150")  # type: ignore[attr-defined]
+
+        await wrapper.impl.submit_target_position("AAPL", 5)
+
+        await asyncio.sleep(0.01)
+
+        assert broker.requests, "Expected coordinator to forward order request"
+        placed = broker.requests[0]
+        assert placed.side == OrderSide.BUY
+        assert placed.quantity == 5
+        assert coordinator._total_notional > Decimal("0")  # type: ignore[attr-defined]
+    finally:
+        await coordinator.stop()
+
+
+@pytest.mark.asyncio
+async def test_factory_strategy_node_uses_config(monkeypatch: pytest.MonkeyPatch) -> None:
+    event_bus = EventBus()
+    market_data = DummyMarketDataService()
+    broker = CaptureBroker()
+
+    class DummyReplayStrategy(BaseStrategy):
+        async def on_bar(self, symbol: str, price: Decimal, broker: BrokerProtocol) -> None:
+            return None
+
+    created_configs: list[str] = []
+
+    def fake_create(config: StrategyConfig) -> DummyReplayStrategy:
+        created_configs.append(config.strategy_type)
+        return DummyReplayStrategy()
+
+    monkeypatch.setattr("ibkr_trader.strategy_configs.factory.StrategyFactory.create", fake_create)
+
+    coordinator = StrategyCoordinator(
+        broker=broker,
+        event_bus=event_bus,
+        market_data=market_data,  # type: ignore[arg-type]
+        risk_guard=None,
+        telemetry=None,
+        subscribe_market_data=False,
+    )
+
+    graph = StrategyGraphConfig(
+        strategies=[
+            StrategyNodeConfig(
+                id="mean_rev_1",
+                type="mean_reversion",
+                symbols=["AAPL"],
+                params={"execution": {"lookback_short": 10}},
+            )
+        ]
+    )
+
+    await coordinator.start(graph)
+    try:
+        assert created_configs == ["mean_reversion"]
+        wrapper = coordinator.strategies["mean_rev_1"]
+        assert wrapper.impl._intent_queue is not None  # type: ignore[attr-defined]
+    finally:
+        await coordinator.stop()

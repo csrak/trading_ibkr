@@ -716,12 +716,8 @@ def trailing_stop_command(
     # Parse prices
     try:
         initial_price_decimal = Decimal(initial_price)
-        trail_amount_decimal: Decimal | None = (
-            Decimal(trail_amount) if trail_amount else None
-        )
-        trail_percent_decimal: Decimal | None = (
-            Decimal(trail_percent) if trail_percent else None
-        )
+        trail_amount_decimal: Decimal | None = Decimal(trail_amount) if trail_amount else None
+        trail_percent_decimal: Decimal | None = Decimal(trail_percent) if trail_percent else None
         activation_price_decimal: Decimal | None = (
             Decimal(activation_price) if activation_price else None
         )

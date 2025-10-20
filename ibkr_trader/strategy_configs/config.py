@@ -78,6 +78,17 @@ class StrategyConfig(BaseModel):
         except ValidationError as exc:
             raise ValueError(f"Invalid configuration: {exc}") from exc
 
+    @classmethod
+    def build_from_type(cls, strategy_type: str, data: dict[str, object]) -> StrategyConfig:
+        config_cls = cls.REGISTRY.get(strategy_type)
+        if config_cls is None:
+            raise ValueError(f"Unknown strategy_type '{strategy_type}'")
+        payload = {"strategy_type": strategy_type, **data}
+        try:
+            return config_cls.model_validate(payload)
+        except ValidationError as exc:
+            raise ValueError(f"Invalid configuration payload: {exc}") from exc
+
 
 class FixedSpreadMMConfig(StrategyConfig):
     strategy_type: Literal["fixed_spread_mm"] = "fixed_spread_mm"

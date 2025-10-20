@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Callable, Iterable, Mapping
-from contextlib import AsyncExitStack
+from contextlib import AsyncExitStack, suppress
 from dataclasses import dataclass
 from decimal import ROUND_DOWN, Decimal
 
@@ -13,7 +13,15 @@ from loguru import logger
 from ibkr_trader.base_strategy import BrokerProtocol
 from ibkr_trader.events import EventBus
 from ibkr_trader.market_data import MarketDataService, SubscriptionRequest
-from ibkr_trader.models import OrderRequest, OrderResult, Position, SymbolContract
+from ibkr_trader.models import (
+    OrderRequest,
+    OrderResult,
+    OrderSide,
+    OrderType,
+    Position,
+    SymbolContract,
+)
+from ibkr_trader.order_intents import MARKET_DELTA, TARGET_POSITION, OrderIntent
 from ibkr_trader.portfolio import RiskGuard
 from ibkr_trader.strategy_configs.graph import StrategyGraphConfig, StrategyNodeConfig
 from ibkr_trader.telemetry import TelemetryReporter
@@ -28,6 +36,7 @@ class CoordinatorContext:
     """Runtime bookkeeping for a strategy managed by the coordinator."""
 
     wrapper: StrategyWrapper
+    proxy: CoordinatorBrokerProxy
     last_notional: Decimal | None = None
 
 
@@ -65,10 +74,15 @@ class CoordinatorBrokerProxy(BrokerProtocol):
                 price,
             )
 
+        signed_notional = Decimal("0")
         if price > 0:
+            signed_notional = price * Decimal(
+                adjusted_request.quantity
+                if adjusted_request.side == OrderSide.BUY
+                else -adjusted_request.quantity
+            )
             if self._exposure_hook is not None:
-                notional = price * Decimal(adjusted_request.quantity)
-                self._exposure_hook(self._strategy_id, symbol, notional)
+                self._exposure_hook(self._strategy_id, symbol, signed_notional)
             self._record_exposure_event(symbol, price, adjusted_request.quantity)
 
         return await self._broker.place_order(adjusted_request)
@@ -228,7 +242,11 @@ class StrategyCoordinator:
         self._capital_policy = capital_policy
         self._telemetry = telemetry
         self._exposure: dict[tuple[str, str], Decimal] = {}
+        self._positions: dict[str, Decimal] = {}
+        self._total_notional: Decimal = Decimal("0")
         self._enable_live_subscriptions = subscribe_market_data
+        self._intent_queue: asyncio.Queue[OrderIntent] = asyncio.Queue()
+        self._intent_task: asyncio.Task[None] | None = None
         self._policy: CapitalAllocationPolicy | None = None
         self._graph: StrategyGraphConfig | None = None
         self._contexts: dict[str, CoordinatorContext] = {}
@@ -262,11 +280,13 @@ class StrategyCoordinator:
                         event_bus=self._event_bus,
                         risk_guard=self._risk_guard,
                     )
+                    wrapper.impl.set_coordinator_identity(node.id)
+                    wrapper.impl.set_order_intent_queue(self._intent_queue)
                 except Exception as exc:
                     raise StrategyInitializationError(
                         f"Failed to initialize strategy '{node.id}': {exc}"
                     ) from exc
-                contexts[node.id] = CoordinatorContext(wrapper=wrapper)
+                contexts[node.id] = CoordinatorContext(wrapper=wrapper, proxy=proxy)
 
             subscription_stack = AsyncExitStack()
             if self._enable_live_subscriptions:
@@ -280,6 +300,9 @@ class StrategyCoordinator:
             self._subscriptions = subscription_stack
             logger.info("StrategyCoordinator started with %d strategies", len(contexts))
 
+            if self._intent_task is None:
+                self._intent_task = asyncio.create_task(self._run_intent_loop())
+
     async def stop(self) -> None:
         """Stop all strategies and release resources."""
         async with self._lock:
@@ -291,25 +314,46 @@ class StrategyCoordinator:
             self._subscriptions = None
 
         for context in contexts:
+            context.wrapper.impl.set_order_intent_queue(None)
             await context.wrapper.stop()
 
         if subscription_stack is not None:
             await subscription_stack.aclose()
 
+        if self._intent_task is not None:
+            self._intent_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await self._intent_task
+            self._intent_task = None
+
+        while not self._intent_queue.empty():
+            try:
+                self._intent_queue.get_nowait()
+            except asyncio.QueueEmpty:  # pragma: no cover - defensive
+                break
+            else:
+                self._intent_queue.task_done()
+
+        self._positions.clear()
+        self._total_notional = Decimal("0")
+
         logger.info("StrategyCoordinator stopped")
 
-    def _record_exposure(self, strategy_id: str, symbol: str, notional: Decimal) -> None:
-        self._exposure[(strategy_id, symbol)] = notional
+    def _record_exposure(self, strategy_id: str, symbol: str, signed_notional: Decimal) -> None:
+        self._exposure[(strategy_id, symbol)] = signed_notional
         context = self._contexts.get(strategy_id)
         if context is not None:
-            context.last_notional = notional
+            context.last_notional = signed_notional
+        self._positions[symbol] = self._positions.get(symbol, Decimal("0")) + signed_notional
+        self._total_notional = sum(abs(val) for val in self._positions.values())
         if self._telemetry is not None:
             self._telemetry.info(
                 "coordinator.exposure_snapshot",
                 context={
                     "strategy_id": strategy_id,
                     "symbol": symbol,
-                    "notional": float(notional),
+                    "notional": float(signed_notional),
+                    "total_notional": float(self._total_notional),
                 },
             )
 
@@ -330,3 +374,114 @@ class StrategyCoordinator:
     @property
     def strategies(self) -> Mapping[str, StrategyWrapper]:
         return {strategy_id: context.wrapper for strategy_id, context in self._contexts.items()}
+
+    async def _run_intent_loop(self) -> None:
+        while True:
+            intent = await self._intent_queue.get()
+            try:
+                await self._handle_intent(intent)
+            except asyncio.CancelledError:  # pragma: no cover - task cancelled during shutdown
+                raise
+            except Exception as exc:  # pragma: no cover - unexpected runtime error
+                logger.error("Failed to process order intent %s: %s", intent, exc)
+                if self._telemetry is not None:
+                    self._telemetry.error(
+                        "coordinator.intent_error",
+                        context={
+                            "strategy_id": intent.strategy_id,
+                            "symbol": intent.symbol,
+                            "intent_type": intent.intent_type,
+                            "error": str(exc),
+                        },
+                    )
+            finally:
+                self._intent_queue.task_done()
+
+    async def _handle_intent(self, intent: OrderIntent) -> None:
+        context = self._contexts.get(intent.strategy_id)
+        if context is None:
+            logger.warning("Received intent for unknown strategy %s", intent.strategy_id)
+            return
+
+        if self._telemetry is not None:
+            self._telemetry.info(
+                "coordinator.intent_received",
+                context={
+                    "strategy_id": intent.strategy_id,
+                    "symbol": intent.symbol,
+                    "intent_type": intent.intent_type,
+                    "quantity": intent.quantity,
+                },
+            )
+
+        if intent.intent_type == TARGET_POSITION:
+            current_position = await self._get_current_position(intent.symbol)
+            delta = intent.quantity - current_position
+        elif intent.intent_type == MARKET_DELTA:
+            delta = intent.quantity
+        else:
+            logger.warning("Unsupported intent type '%s'", intent.intent_type)
+            return
+
+        if delta == 0:
+            if self._telemetry is not None:
+                self._telemetry.info(
+                    "coordinator.intent_ignored",
+                    context={
+                        "strategy_id": intent.strategy_id,
+                        "symbol": intent.symbol,
+                        "intent_type": intent.intent_type,
+                        "reason": "delta_zero",
+                    },
+                )
+            return
+
+        side = OrderSide.BUY if delta > 0 else OrderSide.SELL
+        quantity = abs(delta)
+        price = self._resolve_price_from_strategy(context.wrapper, intent.symbol)
+        contract = SymbolContract(symbol=intent.symbol)
+        effective_price = price or Decimal("0")
+
+        if self._risk_guard is not None and effective_price > 0:
+            await self._risk_guard.validate_order(contract, side, quantity, effective_price)
+
+        order_request = OrderRequest(
+            contract=contract,
+            side=side,
+            quantity=quantity,
+            order_type=OrderType.MARKET,
+            expected_price=effective_price if effective_price > 0 else None,
+        )
+
+        result = await context.proxy.place_order(order_request)
+
+        if self._telemetry is not None:
+            self._telemetry.info(
+                "coordinator.intent_fulfilled",
+                context={
+                    "strategy_id": intent.strategy_id,
+                    "symbol": intent.symbol,
+                    "intent_type": intent.intent_type,
+                    "quantity": quantity,
+                    "order_id": result.order_id,
+                    "total_notional": float(self._total_notional),
+                },
+            )
+
+    async def _get_current_position(self, symbol: str) -> int:
+        positions = await self._broker.get_positions()
+        for pos in positions:
+            if pos.contract.symbol == symbol:
+                return pos.quantity
+        return 0
+
+    @staticmethod
+    def _resolve_price_from_strategy(wrapper: StrategyWrapper, symbol: str) -> Decimal | None:
+        event = wrapper.impl.last_event()
+        if event is None:
+            return None
+        try:
+            return event.price if isinstance(event.price, Decimal) else Decimal(str(event.price))
+        except Exception:  # pragma: no cover - defensive conversion
+            logger.debug("Unable to resolve price from last event for %s", symbol)
+            return None

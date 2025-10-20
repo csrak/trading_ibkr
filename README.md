@@ -208,20 +208,29 @@ A simple moving average crossover strategy for testing:
 ### Running Tests
 
 ```bash
-# Run all tests
-pytest
+# Run all tests (quiet mode - default)
+uv run pytest
+
+# Run with verbose output (for debugging)
+uv run pytest -v
 
 # Run with coverage
-pytest --cov=ibkr_trader --cov-report=html
+uv run pytest --cov=ibkr_trader --cov-report=html
 
 # Run specific test file
-pytest tests/test_safety.py
+uv run pytest tests/test_safety.py
 ```
+
+**Note**: Tests run in quiet mode by default (`-q --tb=short`) to reduce output. Use `-v` when you need detailed information.
 
 ### Type Checking
 
 ```bash
-mypy ibkr_trader
+# Type check (token-efficient, no summary stats)
+uv run mypy ibkr_trader --no-error-summary
+
+# Or with full output when debugging
+uv run mypy ibkr_trader
 ```
 
 ### Linting & Hooks

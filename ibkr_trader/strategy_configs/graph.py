@@ -10,11 +10,11 @@ from typing import Any, ClassVar, Literal
 
 from pydantic import BaseModel, Field, ValidationError, field_validator, model_validator
 
-from ibkr_trader.strategy_configs.config import load_strategy_config
+from ibkr_trader.strategy_configs.config import StrategyConfig, load_strategy_config
 
 SlugPattern: ClassVar[re.Pattern[str]] = re.compile(r"^[a-zA-Z0-9_-]{1,40}$")
 
-StrategyNodeType = Literal["sma", "config_adapter"]
+StrategyNodeType = str
 CapitalPolicyType = Literal["equal_weight", "fixed", "vol_target"]
 
 
@@ -93,6 +93,9 @@ class StrategyNodeConfig(BaseModel):
         else:
             if self.config_path is not None:
                 raise ValueError("config_path is only valid for config_adapter nodes")
+            registry_types = set(StrategyConfig.REGISTRY.keys())
+            if self.type not in {"sma"} | registry_types:
+                raise ValueError(f"Unsupported strategy node type '{self.type}'")
         return self
 
 

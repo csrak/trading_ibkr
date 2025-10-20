@@ -6,6 +6,7 @@ import asyncio
 from abc import abstractmethod
 from collections import deque
 from contextlib import suppress
+from datetime import UTC, datetime
 from decimal import Decimal
 from pathlib import Path
 
@@ -15,6 +16,7 @@ from pydantic import BaseModel, Field
 from ibkr_trader.base_strategy import BaseStrategy, BrokerProtocol
 from ibkr_trader.events import EventBus, EventSubscription, EventTopic, MarketDataEvent
 from ibkr_trader.models import OrderRequest, OrderSide, OrderType, SymbolContract
+from ibkr_trader.order_intents import MARKET_DELTA, TARGET_POSITION, OrderIntent
 from ibkr_trader.portfolio import RiskGuard
 from model.inference.price_predictor import LinearIndustryArtifact
 
@@ -61,6 +63,8 @@ class Strategy(BaseStrategy):
         self._task: asyncio.Task[None] | None = None
         self._last_prices: dict[str, Decimal] = {}
         self._last_event: MarketDataEvent | None = None
+        self._intent_queue: asyncio.Queue[OrderIntent] | None = None
+        self._strategy_id: str | None = None
 
     @abstractmethod
     async def on_bar(self, symbol: str, price: Decimal, broker: BrokerProtocol) -> None:
@@ -127,6 +131,14 @@ class Strategy(BaseStrategy):
     def last_event(self) -> MarketDataEvent | None:
         return self._last_event
 
+    def set_order_intent_queue(self, queue: asyncio.Queue[OrderIntent] | None) -> None:
+        """Attach the coordinator intent queue for target-position messaging."""
+        self._intent_queue = queue
+
+    def set_coordinator_identity(self, strategy_id: str) -> None:
+        """Assign the coordinator strategy identifier."""
+        self._strategy_id = strategy_id
+
     async def place_market_order(self, symbol: str, side: OrderSide, quantity: int) -> None:
         """Place a market order.
 
@@ -150,6 +162,57 @@ class Strategy(BaseStrategy):
             f"Strategy '{self.config.name}': Placed {side.value} order for "
             f"{quantity} {symbol} (Order ID: {result.order_id})"
         )
+
+    async def submit_target_position(
+        self, symbol: str, target: int, metadata: dict[str, object] | None = None
+    ) -> None:
+        """Request a target position for symbol.
+
+        If a coordinator intent queue is attached, the request is enqueued; otherwise we
+        fallback to direct market orders to reconcile the delta.
+        """
+        symbol = symbol.upper()
+        intent = OrderIntent(
+            strategy_id=self._strategy_id or self.config.name,
+            symbol=symbol,
+            intent_type=TARGET_POSITION,
+            quantity=target,
+            timestamp=datetime.now(UTC),
+            metadata=metadata,
+        )
+        if self._intent_queue is not None:
+            self._intent_queue.put_nowait(intent)
+            return
+
+        current_position = await self.get_position(symbol)
+        delta = target - current_position
+        if delta == 0:
+            logger.debug("Target position already met for %s; no action taken", symbol)
+            return
+        side = OrderSide.BUY if delta > 0 else OrderSide.SELL
+        await self.place_market_order(symbol, side, abs(delta))
+
+    async def submit_market_delta(
+        self, symbol: str, delta: int, metadata: dict[str, object] | None = None
+    ) -> None:
+        """Request an immediate delta trade."""
+        if delta == 0:
+            logger.debug("Delta of zero passed to submit_market_delta for %s", symbol)
+            return
+        symbol = symbol.upper()
+        intent = OrderIntent(
+            strategy_id=self._strategy_id or self.config.name,
+            symbol=symbol,
+            intent_type=MARKET_DELTA,
+            quantity=delta,
+            timestamp=datetime.now(UTC),
+            metadata=metadata,
+        )
+        if self._intent_queue is not None:
+            self._intent_queue.put_nowait(intent)
+            return
+        side = OrderSide.BUY if delta > 0 else OrderSide.SELL
+        await self.place_market_order(symbol, side, abs(delta))
 
 
 class SMAConfig(StrategyConfig):
@@ -251,10 +314,10 @@ class SimpleMovingAverageStrategy(Strategy):
                     f"📈 BULLISH CROSSOVER detected for {symbol}: "
                     f"Fast SMA ({fast_sma:.2f}) > Slow SMA ({slow_sma:.2f})"
                 )
-                await self.place_market_order(
+                await self.submit_target_position(
                     symbol=symbol,
-                    side=OrderSide.BUY,
-                    quantity=self.config.position_size,
+                    target=self.config.position_size,
+                    metadata={"signal": "bullish_cross"},
                 )
 
             # Bearish crossover: fast crosses below slow
@@ -263,10 +326,10 @@ class SimpleMovingAverageStrategy(Strategy):
                     f"📉 BEARISH CROSSOVER detected for {symbol}: "
                     f"Fast SMA ({fast_sma:.2f}) < Slow SMA ({slow_sma:.2f})"
                 )
-                await self.place_market_order(
+                await self.submit_target_position(
                     symbol=symbol,
-                    side=OrderSide.SELL,
-                    quantity=self.config.position_size,
+                    target=-self.config.position_size,
+                    metadata={"signal": "bearish_cross"},
                 )
 
         # Update crossover state

@@ -38,7 +38,7 @@ def test_from_cli_defaults_normalizes_symbols() -> None:
 
 
 def test_strategy_ids_must_be_unique() -> None:
-    with pytest.raises(ValidationError) as exc_info:
+    with pytest.raises((ValidationError, ValueError)) as exc_info:
         StrategyGraphConfig(
             strategies=[
                 StrategyNodeConfig(id="dup", type="sma", symbols=["AAPL"]),

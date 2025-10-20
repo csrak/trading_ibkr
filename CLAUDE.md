@@ -21,34 +21,58 @@ IBKR Personal Trader is a **safety-first** trading platform for Interactive Brok
 ## Development Commands
 
 ### Testing
-```bash
-# Run all tests
-pytest
 
-# Run with coverage report
-pytest --cov=ibkr_trader --cov-report=html
+**Default: Quiet Mode** (token-efficient, use for routine checks):
+```bash
+# Run all tests (quiet output with short tracebacks)
+uv run pytest
+
+# Skip slow tests
+uv run pytest -m "not slow"
 
 # Run specific test file
-pytest tests/test_safety.py
+uv run pytest tests/test_safety.py
 
 # Run single test
-pytest tests/test_safety.py::test_specific_function
-
-# Skip slow tests (those marked with @pytest.mark.slow)
-pytest -m "not slow"
+uv run pytest tests/test_safety.py::test_specific_function
 ```
 
-### Type Checking & Linting
+**Verbose Mode** (use when debugging failures):
 ```bash
-# Type check (strict mode enforced)
-mypy ibkr_trader
+# Full output when you need details
+uv run pytest -v
 
-# Format, lint, and verify syntax
+# Very verbose with full tracebacks
+uv run pytest -vv
+
+# Stop on first failure
+uv run pytest -x
+
+# With coverage report (generates more output)
+uv run pytest --cov=ibkr_trader --cov-report=html
+```
+
+**Note**: Default pytest behavior is now `-q --tb=short` (configured in `pyproject.toml`) to reduce token usage. Use `-v` explicitly when you need detailed output for debugging.
+
+### Type Checking & Linting
+
+**Token-efficient defaults**:
+```bash
+# Type check (suppress stats summary)
+uv run mypy ibkr_trader --no-error-summary
+
+# Format, lint, and verify syntax (already terse)
 ./linter.sh
 
-# Manual ruff commands
+# Manual ruff commands (already token-efficient)
 uv run ruff format ibkr_trader tests
 uv run ruff check --fix ibkr_trader tests
+```
+
+**When debugging type errors**:
+```bash
+# Full mypy output with error context
+uv run mypy ibkr_trader
 ```
 
 ### Git Hooks

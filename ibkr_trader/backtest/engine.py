@@ -45,6 +45,10 @@ class BacktestEngine:
         execution_task = asyncio.create_task(self._execution_listener())
 
         await strategy.start()
+        if hasattr(strategy, "set_order_intent_queue"):
+            strategy.set_order_intent_queue(None)  # type: ignore[attr-defined]
+            if hasattr(strategy, "set_coordinator_identity"):
+                strategy.set_coordinator_identity(strategy.config.name)  # type: ignore[attr-defined]
 
         async def _publish(price_time: datetime, price_value: Decimal) -> None:
             await self.market_data.publish_price(self.symbol, price_value, timestamp=price_time)

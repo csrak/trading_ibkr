@@ -71,6 +71,7 @@ default-groups = ["dev", "training"]
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+addopts = "-q --tb=short"
 markers = [
     "slow: Live data integration tests that call external services",
 ]

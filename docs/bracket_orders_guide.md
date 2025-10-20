@@ -334,6 +334,10 @@ For live trading, you would need to create a separate live trading command with 
 Run the bracket order tests to verify functionality:
 
 ```bash
+# Quiet mode (default)
+uv run pytest tests/test_bracket_orders.py
+
+# Verbose mode (for debugging)
 uv run pytest tests/test_bracket_orders.py -v
 ```
 

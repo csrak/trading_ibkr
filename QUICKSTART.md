@@ -165,15 +165,15 @@ ibkr-trader cache-option-chain --symbol AAPL \
 ## Development Workflow
 
 ```bash
-# Run tests
-pytest
+# Run tests (quiet mode by default)
+uv run pytest
 
-# Type check
-mypy ibkr_trader
+# Type check (token-efficient)
+uv run mypy ibkr_trader --no-error-summary
 
 # Lint and format
-ruff check ibkr_trader
-ruff format ibkr_trader
+uv run ruff check ibkr_trader
+uv run ruff format ibkr_trader
 ```
 
 ## Safety Reminder
