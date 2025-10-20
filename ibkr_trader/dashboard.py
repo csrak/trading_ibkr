@@ -22,7 +22,7 @@ from ibkr_trader.events import (
     MarketDataEvent,
     OrderStatusEvent,
 )
-from ibkr_trader.portfolio import PortfolioState
+from ibkr_trader.portfolio import PortfolioState, SymbolLimitRegistry
 
 
 class TradingDashboard:
@@ -42,6 +42,7 @@ class TradingDashboard:
         portfolio: PortfolioState,
         max_position_size: int,
         max_daily_loss: Decimal,
+        symbol_limits: SymbolLimitRegistry | None = None,
     ) -> None:
         """Initialize dashboard.
 
@@ -50,11 +51,13 @@ class TradingDashboard:
             portfolio: Portfolio state tracker
             max_position_size: Maximum position size for warnings
             max_daily_loss: Daily loss limit for risk indicators
+            symbol_limits: Optional per-symbol limit registry for utilization display
         """
         self.event_bus = event_bus
         self.portfolio = portfolio
         self.max_position_size = max_position_size
         self.max_daily_loss = max_daily_loss
+        self.symbol_limits = symbol_limits
 
         # State tracking
         self.recent_orders: list[dict[str, Any]] = []
@@ -202,7 +205,9 @@ class TradingDashboard:
         table.add_column("Avg Price", justify="right")
         table.add_column("Market Price", justify="right")
         table.add_column("P&L", justify="right")
-        table.add_column("Size Warning", justify="center")
+        table.add_column("Limit Util", justify="center")
+
+        has_symbol_specific_limit = False
 
         if not self.portfolio.snapshot.positions:
             table.add_row("No positions", "", "", "", "", "")
@@ -218,14 +223,41 @@ class TradingDashboard:
                 pnl = market_value - cost_basis
                 pnl_color = "green" if pnl >= 0 else "red"
 
-                # Size warning
-                size_pct = abs(qty) / self.max_position_size * 100
-                if size_pct >= 90:
-                    warning = "[red]⚠[/red]"
-                elif size_pct >= 80:
-                    warning = "[yellow]⚠[/yellow]"
+                # Determine limit utilization
+                limit_entry = (
+                    self.symbol_limits.get_limit(symbol) if self.symbol_limits is not None else None
+                )
+                limit_override = bool(
+                    limit_entry
+                    and limit_entry.symbol != "*DEFAULT*"
+                    and limit_entry.max_position_size
+                )
+                limit_value: int | None = None
+                if limit_entry and limit_entry.max_position_size is not None:
+                    limit_value = limit_entry.max_position_size
+                elif self.max_position_size:
+                    limit_value = self.max_position_size
+
+                warning = ""
+                if limit_value and limit_value > 0:
+                    size_pct = abs(qty) / limit_value * 100
+                    if size_pct >= 100:
+                        warning = "[red]⚠[/red]"
+                        color = "red"
+                    elif size_pct >= 80:
+                        warning = "[yellow]⚠[/yellow]"
+                        color = "yellow"
+                    else:
+                        color = "green"
+                    suffix = " *" if limit_override else ""
+                    limit_text = f"[{color}]{abs(qty)}/{limit_value} ({size_pct:.0f}%){suffix}[/]"
+                    if warning:
+                        limit_text = f"{limit_text} {warning}"
                 else:
-                    warning = ""
+                    limit_text = "--"
+
+                if limit_override:
+                    has_symbol_specific_limit = True
 
                 table.add_row(
                     symbol,
@@ -233,10 +265,11 @@ class TradingDashboard:
                     f"${avg_price:.2f}",
                     f"${market_price:.2f}",
                     f"[{pnl_color}]${pnl:,.2f}[/]",
-                    warning,
+                    limit_text,
                 )
 
-        return Panel(table, title="Positions", border_style="cyan")
+        subtitle = "* denotes symbol-specific limit" if has_symbol_specific_limit else None
+        return Panel(table, title="Positions", border_style="cyan", subtitle=subtitle)
 
     def _build_activity_panel(self) -> Panel:
         """Build recent activity panel."""

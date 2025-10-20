@@ -13,12 +13,12 @@ from ibkr_trader.constants import DEFAULT_PORTFOLIO_SNAPSHOT
 from ibkr_trader.events import EventBus
 from ibkr_trader.market_data import MarketDataService, SubscriptionRequest
 from ibkr_trader.models import SymbolContract
-from ibkr_trader.portfolio import PortfolioState, RiskGuard
 from ibkr_trader.safety import LiveTradingGuard
 from ibkr_trader.summary import summarize_run
 from model.data import FileCacheStore, IBKRMarketDataSource, OptionChainCacheStore
 
 from .utils import (
+    build_portfolio_and_risk_guard,
     format_seconds,
     format_telemetry_line,
     setup_logging,
@@ -193,16 +193,8 @@ async def run_dashboard(config: "IBKRConfig") -> None:  # noqa: F821
 
     # Initialize components
     event_bus = EventBus()
-    snapshot_path = config.data_dir / DEFAULT_PORTFOLIO_SNAPSHOT.name
-    portfolio = PortfolioState(
-        Decimal(str(config.max_daily_loss)),
-        snapshot_path=snapshot_path,
-    )
-    risk_guard = RiskGuard(
-        portfolio=portfolio,
-        max_exposure=Decimal(str(config.max_order_exposure)),
-    )
     guard = LiveTradingGuard(config=config, live_flag_enabled=False)
+    portfolio, risk_guard, symbol_limits = build_portfolio_and_risk_guard(config)
     broker = IBKRBroker(
         config=config,
         guard=guard,
@@ -236,6 +228,7 @@ async def run_dashboard(config: "IBKRConfig") -> None:  # noqa: F821
             portfolio=portfolio,
             max_position_size=config.max_position_size,
             max_daily_loss=Decimal(str(config.max_daily_loss)),
+            symbol_limits=symbol_limits,
         )
 
         logger.info("Starting dashboard...")

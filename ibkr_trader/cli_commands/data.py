@@ -12,9 +12,7 @@ from loguru import logger
 
 from ibkr_trader.backtest.engine import BacktestEngine
 from ibkr_trader.config import load_config
-from ibkr_trader.constants import DEFAULT_PORTFOLIO_SNAPSHOT
 from ibkr_trader.events import EventBus
-from ibkr_trader.portfolio import PortfolioState, RiskGuard
 from ibkr_trader.sim.broker import SimulatedBroker, SimulatedMarketData
 from ibkr_trader.strategy import (
     IndustryModelConfig,
@@ -32,6 +30,7 @@ from model.data import (
 from model.training.industry_model import train_linear_industry_model
 
 from .utils import (
+    build_portfolio_and_risk_guard,
     create_market_data_client,
     create_option_chain_client,
     emit_run_summary,
@@ -102,12 +101,7 @@ def backtest(
         file_path=config.log_dir / "telemetry.jsonl",
     )
     market_data = SimulatedMarketData(event_bus)
-    snapshot_path = config.data_dir / DEFAULT_PORTFOLIO_SNAPSHOT.name
-    portfolio = PortfolioState(Decimal(str(config.max_daily_loss)), snapshot_path=snapshot_path)
-    risk_guard = RiskGuard(
-        portfolio=portfolio,
-        max_exposure=Decimal(str(config.max_order_exposure)),
-    )
+    portfolio, risk_guard, _ = build_portfolio_and_risk_guard(config)
     broker = SimulatedBroker(event_bus=event_bus, risk_guard=risk_guard)
 
     strategy_name_normalized = strategy_name.lower()

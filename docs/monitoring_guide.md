@@ -101,13 +101,13 @@ Launches a full-screen terminal dashboard that updates in real-time (2Hz refresh
 - **Avg Price**: Average entry price
 - **Market Price**: Current market price (live)
 - **P&L**: Unrealized profit/loss (color-coded)
-- **Size Warning**: ⚠ indicator when > 80% of max position size
+- **Limit Util**: Current vs allowed size (⚠ when > 80%; `*` denotes symbol-specific limit)
 
 **Color Coding:**
 - 🟢 Green: Profitable position
 - 🔴 Red: Losing position
 - 🟡 Yellow ⚠: Position size 80-90% of limit
-- 🔴 Red ⚠: Position size ≥ 90% of limit
+- 🔴 Red ⚠: Position size ≥ 90% of limit (orders blocked at 100%)
 
 #### 3. Activity Feed (Bottom Right)
 

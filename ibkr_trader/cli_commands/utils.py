@@ -3,11 +3,19 @@
 import json
 import sys
 from collections import deque
+from decimal import Decimal
 from pathlib import Path
 
 import typer
 from loguru import logger
 
+from ibkr_trader.constants import (
+    DEFAULT_CORRELATION_MATRIX_FILE,
+    DEFAULT_PORTFOLIO_SNAPSHOT,
+    DEFAULT_SYMBOL_LIMITS_FILE,
+)
+from ibkr_trader.portfolio import PortfolioState, RiskGuard, SymbolLimitRegistry
+from ibkr_trader.risk import CorrelationMatrix, CorrelationRiskGuard
 from ibkr_trader.summary import summarize_run
 from ibkr_trader.telemetry import TelemetryReporter
 from model.data import (
@@ -50,6 +58,58 @@ def setup_logging(log_dir: Path, verbose: bool = False) -> None:
         retention="7 days",
         level="DEBUG",
     )
+
+
+def load_symbol_limit_registry(config: "IBKRConfig") -> SymbolLimitRegistry:  # noqa: F821
+    """Load symbol limit registry for the given configuration."""
+
+    symbol_limit_path = config.data_dir / DEFAULT_SYMBOL_LIMITS_FILE.name
+    return SymbolLimitRegistry(config_path=symbol_limit_path)
+
+
+def build_portfolio_and_risk_guard(
+    config: "IBKRConfig",  # noqa: F821
+) -> tuple[PortfolioState, RiskGuard, SymbolLimitRegistry]:
+    """Instantiate portfolio state, symbol limits, and risk guard."""
+
+    snapshot_path = config.data_dir / DEFAULT_PORTFOLIO_SNAPSHOT.name
+    symbol_limits = load_symbol_limit_registry(config)
+
+    correlation_guard: CorrelationRiskGuard | None = None
+    max_correlated = getattr(config, "max_correlated_exposure", None)
+    if max_correlated:
+        matrix_path = config.data_dir / DEFAULT_CORRELATION_MATRIX_FILE.name
+        matrix = CorrelationMatrix.load(matrix_path)
+        if matrix is None:
+            logger.debug(
+                "No correlation matrix found at %s; correlation guard disabled",
+                matrix_path,
+            )
+        else:
+            threshold = float(getattr(config, "correlation_threshold", 0.75))
+            try:
+                correlation_guard = CorrelationRiskGuard(
+                    correlation_matrix=matrix,
+                    max_correlated_exposure=Decimal(str(max_correlated)),
+                    threshold=threshold,
+                )
+            except ValueError as exc:
+                logger.warning(
+                    "Correlation guard disabled due to invalid configuration: %s",
+                    exc,
+                )
+
+    portfolio = PortfolioState(
+        Decimal(str(config.max_daily_loss)),
+        snapshot_path=snapshot_path,
+    )
+    risk_guard = RiskGuard(
+        portfolio=portfolio,
+        max_exposure=Decimal(str(config.max_order_exposure)),
+        symbol_limits=symbol_limits,
+        correlation_guard=correlation_guard,
+    )
+    return portfolio, risk_guard, symbol_limits
 
 
 def create_market_data_client(

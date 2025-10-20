@@ -48,6 +48,14 @@ class IBKRConfig(BaseSettings):
         default=True,
         description="Generate mock market data instead of streaming from IBKR",
     )
+    max_correlated_exposure: float | None = Field(
+        default=None,
+        description="Maximum combined exposure (USD) across highly correlated symbols",
+    )
+    correlation_threshold: float = Field(
+        default=0.75,
+        description="Correlation coefficient threshold for aggregating exposures",
+    )
 
     # Data paths
     data_dir: Path = Field(default=Path("data"), description="Directory for storing data")
@@ -93,6 +101,14 @@ class IBKRConfig(BaseSettings):
             # Live trading port
             pass  # Will be caught by LiveTradingGuard
         return v
+
+    @field_validator("correlation_threshold")
+    @classmethod
+    def validate_correlation_threshold(cls, value: float) -> float:
+        """Ensure correlation threshold is in a valid range."""
+        if not (0.0 < value <= 1.0):
+            raise ValueError("correlation_threshold must be between 0 and 1 (exclusive of 0).")
+        return value
 
     def model_post_init(self, __context: object) -> None:
         """Create directories after initialization."""

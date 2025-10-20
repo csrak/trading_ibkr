@@ -13,6 +13,8 @@ A **safe, modular, and type-safe** trading platform for Interactive Brokers TWS,
 - Multi-step authentication for live trading
 - Position size limits
 - Daily loss limits
+- Per-symbol overrides via `ibkr-trader set-symbol-limit`
+- Correlation guard caps clustered exposure across highly correlated symbols
 - Type-safe with `mypy --strict`
 - Pydantic v2 validation on all I/O
 
@@ -97,7 +99,10 @@ IBKR_HOST=127.0.0.1  # Use 192.168.x.x if running from WSL (see above)
 IBKR_MAX_POSITION_SIZE=100
 IBKR_MAX_DAILY_LOSS=1000.0
 IBKR_MAX_ORDER_EXPOSURE=10000.0
+IBKR_MAX_CORRELATED_EXPOSURE=25000.0  # Optional: combined exposure cap for correlated symbols
+IBKR_CORRELATION_THRESHOLD=0.75       # Optional: correlation coefficient threshold (0-1]
 IBKR_USE_MOCK_MARKET_DATA=true  # Set to false to stream real market data (requires entitlements)
+# Provide correlations in data/correlation_matrix.json when enabling the guard
 ```
 
 ## Quick Start
@@ -351,6 +356,7 @@ Contributions welcome! Please:
 - Documentation:
   - [Quick Start Guide](QUICKSTART.md)
   - [Model Training & Data Caching Guide](docs/model_training_guide.md)
+  - [Risk Management Guide](docs/risk_management.md)
   - [Market Making Simulation Plan](docs/market_making/simulation_plan.md)
 
 ---

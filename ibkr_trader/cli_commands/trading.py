@@ -10,9 +10,13 @@ import typer
 from loguru import logger
 
 from ibkr_trader.broker import IBKRBroker
+from ibkr_trader.cli_commands.utils import (
+    build_portfolio_and_risk_guard,
+    load_symbol_limit_registry,
+)
 from ibkr_trader.config import TradingMode, load_config
 from ibkr_trader.constants import (
-    DEFAULT_PORTFOLIO_SNAPSHOT,
+    DEFAULT_SYMBOL_LIMITS_FILE,
     MARKET_DATA_IDLE_SLEEP_SECONDS,
     MOCK_PRICE_BASE,
     MOCK_PRICE_SLEEP_SECONDS,
@@ -293,15 +297,7 @@ def paper_order(
             raise typer.BadParameter("Invalid stop price format.") from exc
 
     guard = LiveTradingGuard(config=config, live_flag_enabled=False)
-    snapshot_path = config.data_dir / DEFAULT_PORTFOLIO_SNAPSHOT.name
-    portfolio = PortfolioState(
-        Decimal(str(config.max_daily_loss)),
-        snapshot_path=snapshot_path,
-    )
-    risk_guard = RiskGuard(
-        portfolio=portfolio,
-        max_exposure=Decimal(str(config.max_order_exposure)),
-    )
+    _, risk_guard, _ = build_portfolio_and_risk_guard(config)
     guard.acknowledge_live_trading()
 
     try:
@@ -388,15 +384,7 @@ def paper_quick(
     contract, effective_quantity = preset_obj.with_quantity(quantity)
 
     guard = LiveTradingGuard(config=config, live_flag_enabled=False)
-    snapshot_path = config.data_dir / DEFAULT_PORTFOLIO_SNAPSHOT.name
-    portfolio = PortfolioState(
-        Decimal(str(config.max_daily_loss)),
-        snapshot_path=snapshot_path,
-    )
-    risk_guard = RiskGuard(
-        portfolio=portfolio,
-        max_exposure=Decimal(str(config.max_order_exposure)),
-    )
+    _, risk_guard, _ = build_portfolio_and_risk_guard(config)
     guard.acknowledge_live_trading()
 
     try:
@@ -509,15 +497,7 @@ def bracket_order(
 
     # Create broker components
     guard = LiveTradingGuard(config=config, live_flag_enabled=False)
-    snapshot_path = config.data_dir / DEFAULT_PORTFOLIO_SNAPSHOT.name
-    portfolio = PortfolioState(
-        Decimal(str(config.max_daily_loss)),
-        snapshot_path=snapshot_path,
-    )
-    risk_guard = RiskGuard(
-        portfolio=portfolio,
-        max_exposure=Decimal(str(config.max_order_exposure)),
-    )
+    _, risk_guard, _ = build_portfolio_and_risk_guard(config)
     guard.acknowledge_live_trading()
 
     try:
@@ -740,15 +720,7 @@ def trailing_stop_command(
 
     # Create broker and trailing stop manager
     guard = LiveTradingGuard(config=config, live_flag_enabled=False)
-    snapshot_path = config.data_dir / DEFAULT_PORTFOLIO_SNAPSHOT.name
-    portfolio = PortfolioState(
-        Decimal(str(config.max_daily_loss)),
-        snapshot_path=snapshot_path,
-    )
-    risk_guard = RiskGuard(
-        portfolio=portfolio,
-        max_exposure=Decimal(str(config.max_order_exposure)),
-    )
+    _, risk_guard, _ = build_portfolio_and_risk_guard(config)
     guard.acknowledge_live_trading()
 
     try:
@@ -916,15 +888,7 @@ def oco_order_command(
 
     # Create broker components
     guard = LiveTradingGuard(config=config, live_flag_enabled=False)
-    snapshot_path = config.data_dir / DEFAULT_PORTFOLIO_SNAPSHOT.name
-    portfolio = PortfolioState(
-        Decimal(str(config.max_daily_loss)),
-        snapshot_path=snapshot_path,
-    )
-    risk_guard = RiskGuard(
-        portfolio=portfolio,
-        max_exposure=Decimal(str(config.max_order_exposure)),
-    )
+    _, risk_guard, _ = build_portfolio_and_risk_guard(config)
     guard.acknowledge_live_trading()
 
     try:
@@ -1052,6 +1016,136 @@ async def create_oco_order(
     finally:
         await oco_manager.stop()
         await broker.disconnect()
+
+
+@trading_app.command("set-symbol-limit")
+def set_symbol_limit(
+    symbol: str | None = typer.Option(
+        None,
+        "--symbol",
+        "-s",
+        help="Symbol to configure (omit with --default to update fallback limits)",
+    ),
+    max_position: int | None = typer.Option(
+        None,
+        "--max-position",
+        min=0,
+        help="Maximum position size (shares) allowed for the symbol",
+    ),
+    max_exposure: str | None = typer.Option(
+        None,
+        "--max-exposure",
+        help="Maximum per-order notional exposure in USD",
+    ),
+    max_loss: str | None = typer.Option(
+        None,
+        "--max-loss",
+        help="Maximum realized loss allowed per trading day (USD)",
+    ),
+    default: bool = typer.Option(
+        False,
+        "--default",
+        help="Update the default limits applied when no symbol-specific limit exists",
+    ),
+) -> None:
+    """Create or update per-symbol risk limits."""
+
+    if not default and symbol is None:
+        raise typer.BadParameter("Specify --symbol or pass --default to update fallback limits.")
+
+    if default and symbol is not None:
+        logger.warning("Ignoring --symbol when --default is provided")
+
+    max_exposure_decimal: Decimal | None = None
+    if max_exposure is not None:
+        try:
+            max_exposure_decimal = Decimal(max_exposure)
+        except (InvalidOperation, ValueError) as exc:
+            raise typer.BadParameter("Invalid decimal for --max-exposure.") from exc
+
+    max_loss_decimal: Decimal | None = None
+    if max_loss is not None:
+        try:
+            max_loss_decimal = Decimal(max_loss)
+        except (InvalidOperation, ValueError) as exc:
+            raise typer.BadParameter("Invalid decimal for --max-loss.") from exc
+
+    if all(value is None for value in (max_position, max_exposure_decimal, max_loss_decimal)):
+        raise typer.BadParameter(
+            "Provide at least one of --max-position, --max-exposure, or --max-loss."
+        )
+
+    config = load_config()
+    symbol_limits = load_symbol_limit_registry(config)
+
+    global_max_position = config.max_position_size
+    global_max_exposure = Decimal(str(config.max_order_exposure))
+    global_max_daily_loss = Decimal(str(config.max_daily_loss))
+
+    def _validate_against_global(
+        label: str,
+        *,
+        pos: int | None,
+        exposure: Decimal | None,
+        loss: Decimal | None,
+    ) -> None:
+        if pos is not None and pos > global_max_position:
+            raise typer.BadParameter(
+                f"{label}: max position {pos} exceeds global limit {global_max_position}"
+            )
+        if exposure is not None and exposure > global_max_exposure:
+            raise typer.BadParameter(
+                f"{label}: max exposure {exposure} exceeds global limit {global_max_exposure}"
+            )
+        if loss is not None and loss > global_max_daily_loss:
+            raise typer.BadParameter(
+                f"{label}: max loss {loss} exceeds global limit {global_max_daily_loss}"
+            )
+
+    if default:
+        _validate_against_global(
+            "Default limits",
+            pos=max_position,
+            exposure=max_exposure_decimal,
+            loss=max_loss_decimal,
+        )
+        symbol_limits.set_default_limit(
+            max_position_size=max_position,
+            max_order_exposure=max_exposure_decimal,
+            max_daily_loss=max_loss_decimal,
+        )
+        effective_limits = symbol_limits.default_limits
+        target_label = "default limits"
+    else:
+        assert symbol is not None
+        symbol_upper = symbol.upper()
+        _validate_against_global(
+            f"Limits for {symbol_upper}",
+            pos=max_position,
+            exposure=max_exposure_decimal,
+            loss=max_loss_decimal,
+        )
+        symbol_limits.set_symbol_limit(
+            symbol=symbol_upper,
+            max_position_size=max_position,
+            max_order_exposure=max_exposure_decimal,
+            max_daily_loss=max_loss_decimal,
+        )
+        effective_limits = symbol_limits.get_limit(symbol_upper)
+        target_label = f"{symbol_upper} limits"
+
+    if effective_limits is None:
+        raise typer.Exit(code=1)
+
+    target_path = symbol_limits.config_path or (config.data_dir / DEFAULT_SYMBOL_LIMITS_FILE.name)
+    symbol_limits.save_config(target_path)
+
+    typer.echo(
+        f"Updated {target_label}: max_position={effective_limits.max_position_size}, "
+        f"max_exposure={effective_limits.max_order_exposure}, "
+        f"max_daily_loss={effective_limits.max_daily_loss}"
+    )
+    typer.echo(f"Configuration saved to {target_path}")
 
 
 @trading_app.command()
@@ -1224,15 +1318,7 @@ async def run_strategy(
         },
     )
     market_data = MarketDataService(event_bus=event_bus)
-    snapshot_path = config.data_dir / DEFAULT_PORTFOLIO_SNAPSHOT.name
-    portfolio = PortfolioState(
-        Decimal(str(config.max_daily_loss)),
-        snapshot_path=snapshot_path,
-    )
-    risk_guard = RiskGuard(
-        portfolio=portfolio,
-        max_exposure=Decimal(str(config.max_order_exposure)),
-    )
+    portfolio, risk_guard, symbol_limits = build_portfolio_and_risk_guard(config)
     broker = IBKRBroker(
         config=config,
         guard=guard,

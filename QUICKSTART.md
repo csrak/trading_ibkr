@@ -113,6 +113,21 @@ can run multiple strategies at once. The included demo graph launches two SMA
 configurations (AAPL + MSFT) with independent sizing caps while sharing the same broker
 and market data streams.
 
+## 9. Configure Per-Symbol Limits
+
+```bash
+# Apply tighter limits to TSLA
+ibkr-trader set-symbol-limit --symbol TSLA \
+  --max-position 15 --max-exposure 3500 --max-loss 200
+
+# Update fallback defaults for every other symbol
+ibkr-trader set-symbol-limit --default --max-position 50 --max-loss 500
+```
+
+This command updates `data/symbol_limits.json` and prevents orders that exceed the
+per-symbol position, exposure, or daily loss thresholds. The live dashboard will show
+limit utilisation so you can spot symbols that are nearing their cap.
+
 ## Common Issues
 
 ### "Connection refused" or "Connection timeout"
@@ -135,7 +150,8 @@ and market data streams.
 1. **Monitor Logs**: Check `logs/` directory for detailed activity
 2. **Review Positions**: Use `ibkr-trader status` anytime
 3. **Test Thoroughly**: Run paper trading for several days
-4. **Read Docs**: See `README.md` for advanced features
+4. **Tune Risk Limits**: Run `ibkr-trader set-symbol-limit` and maintain `data/correlation_matrix.json`
+5. **Read Docs**: See `README.md` for advanced features
 
 ### Offline Model Training
 

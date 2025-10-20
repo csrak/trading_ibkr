@@ -22,7 +22,8 @@ from ibkr_trader.models import (
     Position,
     SymbolContract,
 )
-from ibkr_trader.portfolio import PortfolioState, RiskGuard
+from ibkr_trader.portfolio import PortfolioState, RiskGuard, SymbolLimitRegistry, SymbolLimits
+from ibkr_trader.risk import CorrelationMatrix, CorrelationRiskGuard
 from ibkr_trader.safety import LiveTradingError, LiveTradingGuard
 from ibkr_trader.sim.broker import SimulatedBroker, SimulatedMarketData
 from ibkr_trader.strategy import (
@@ -54,6 +55,10 @@ __all__ = [
     "SymbolContract",
     "PortfolioState",
     "RiskGuard",
+    "SymbolLimitRegistry",
+    "SymbolLimits",
+    "CorrelationMatrix",
+    "CorrelationRiskGuard",
     "LiveTradingGuard",
     "LiveTradingError",
     "Strategy",
