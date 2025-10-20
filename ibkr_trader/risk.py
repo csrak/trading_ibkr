@@ -28,7 +28,7 @@ class CorrelationMatrix:
                         self.set_correlation(symbol, other, float(value))
                     except (TypeError, ValueError):
                         logger.warning(
-                            "Skipping invalid correlation entry %s -> %s=%s",
+                            "Skipping invalid correlation entry {} -> {}={}",
                             symbol,
                             other,
                             value,
@@ -77,9 +77,9 @@ class CorrelationMatrix:
         try:
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text(json.dumps(self.to_dict(), indent=2), encoding="utf-8")
-            logger.info("Saved correlation matrix to %s", path)
+            logger.info("Saved correlation matrix to {}", path)
         except Exception as exc:  # pragma: no cover - IO safety
-            logger.error("Failed to save correlation matrix to %s: %s", path, exc)
+            logger.error("Failed to save correlation matrix to {}: {}", path, exc)
 
     @classmethod
     def load(cls, path: Path) -> CorrelationMatrix | None:
@@ -92,7 +92,7 @@ class CorrelationMatrix:
                 raise ValueError("Correlation matrix must be a JSON object")
             return cls(payload)
         except Exception as exc:
-            logger.error("Failed to load correlation matrix from %s: %s", path, exc)
+            logger.error("Failed to load correlation matrix from {}: {}", path, exc)
             return None
 
 
@@ -129,7 +129,7 @@ class CorrelationRiskGuard:
             return
         if price <= 0:
             logger.debug(
-                "Skipping correlation check for %s due to non-positive price %s",
+                "Skipping correlation check for {} due to non-positive price {}",
                 contract.symbol,
                 price,
             )

@@ -187,7 +187,7 @@ class Strategy(BaseStrategy):
         current_position = await self.get_position(symbol)
         delta = target - current_position
         if delta == 0:
-            logger.debug("Target position already met for %s; no action taken", symbol)
+            logger.debug("Target position already met for {}; no action taken", symbol)
             return
         side = OrderSide.BUY if delta > 0 else OrderSide.SELL
         await self.place_market_order(symbol, side, abs(delta))
@@ -197,7 +197,7 @@ class Strategy(BaseStrategy):
     ) -> None:
         """Request an immediate delta trade."""
         if delta == 0:
-            logger.debug("Delta of zero passed to submit_market_delta for %s", symbol)
+            logger.debug("Delta of zero passed to submit_market_delta for {}", symbol)
             return
         symbol = symbol.upper()
         intent = OrderIntent(

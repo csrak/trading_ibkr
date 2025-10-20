@@ -26,6 +26,7 @@ from ibkr_trader.portfolio import PortfolioState, RiskGuard, SymbolLimitRegistry
 from ibkr_trader.risk import CorrelationMatrix, CorrelationRiskGuard
 from ibkr_trader.safety import LiveTradingError, LiveTradingGuard
 from ibkr_trader.sim.broker import SimulatedBroker, SimulatedMarketData
+from ibkr_trader.strategies import AdaptiveMomentumConfig, AdaptiveMomentumStrategy
 from ibkr_trader.strategy import (
     IndustryModelConfig,
     IndustryModelStrategy,
@@ -57,6 +58,8 @@ __all__ = [
     "RiskGuard",
     "SymbolLimitRegistry",
     "SymbolLimits",
+    "AdaptiveMomentumConfig",
+    "AdaptiveMomentumStrategy",
     "CorrelationMatrix",
     "CorrelationRiskGuard",
     "LiveTradingGuard",

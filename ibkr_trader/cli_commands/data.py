@@ -76,7 +76,7 @@ def backtest(
 
     if timestamp_column not in frame.columns or price_column not in frame.columns:
         logger.error(
-            "Backtest dataset must contain '%s' and '%s' columns",
+            "Backtest dataset must contain '{}' and '{}' columns",
             timestamp_column,
             price_column,
         )
@@ -106,7 +106,7 @@ def backtest(
 
     strategy_name_normalized = strategy_name.lower()
     if strategy_name_normalized not in {"sma", "industry"}:
-        logger.error("Unsupported strategy '%s'", strategy_name)
+        logger.error("Unsupported strategy '{}'", strategy_name)
         raise typer.Exit(code=1)
 
     if strategy_name_normalized == "industry":
@@ -151,7 +151,7 @@ def backtest(
 
     asyncio.run(engine.run(strategy, bars))
 
-    logger.info("Backtest completed with %s executions", len(broker.execution_events))
+    logger.info("Backtest completed with {} executions", len(broker.execution_events))
     emit_run_summary(config=config, telemetry=telemetry, label="backtest")
 
 
@@ -281,7 +281,7 @@ def train_model_command(
         )
 
     except SnapshotLimitError as exc:
-        logger.error("Snapshot limit reached while requesting IBKR data: %s", exc)
+        logger.error("Snapshot limit reached while requesting IBKR data: {}", exc)
         raise typer.Exit(code=1) from exc
     except typer.BadParameter:
         raise
@@ -293,12 +293,12 @@ def train_model_command(
             with suppress(Exception):
                 source.close()
 
-    logger.info("Model artifact stored at %s", artifact_path)
+    logger.info("Model artifact stored at {}", artifact_path)
     predictions_path = artifact_path.parent / f"{target_symbol}_predictions.csv"
     if predictions_path.exists():
-        logger.info("Predictions saved to %s", predictions_path)
+        logger.info("Predictions saved to {}", predictions_path)
     else:  # pragma: no cover - defensive logging
-        logger.warning("Prediction CSV not found at expected path: %s", predictions_path)
+        logger.warning("Prediction CSV not found at expected path: {}", predictions_path)
 
 
 @data_app.command("cache-option-chain")
@@ -387,7 +387,7 @@ def cache_option_chain_command(
             OptionChainRequest(symbol=symbol, expiry=expiry.replace(tzinfo=UTC))
         )
     except SnapshotLimitError as exc:
-        logger.error("Snapshot limit reached while requesting IBKR options: %s", exc)
+        logger.error("Snapshot limit reached while requesting IBKR options: {}", exc)
         raise typer.Exit(code=1) from exc
     except Exception as exc:  # pragma: no cover - surface errors to user
         logger.error(f"Failed to cache option chain: {exc}")
@@ -398,7 +398,7 @@ def cache_option_chain_command(
                 source.close()
 
     logger.info(
-        "Cached option chain for %s expiring %s (%d calls, %d puts)",
+        "Cached option chain for {} expiring {} ({} calls, {} puts)",
         symbol.upper(),
         expiry.strftime("%Y-%m-%d"),
         len(chain.calls),

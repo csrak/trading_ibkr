@@ -291,7 +291,7 @@ class IBKRBroker:
                 )
                 loop.create_task(self._publish_execution(event))
             except Exception as exc:
-                logger.warning("Failed to handle execution event: %s", exc)
+                logger.warning("Failed to handle execution event: {}", exc)
 
         def _handle_commission(
             trade_obj: Trade, fill: Fill, report: CommissionReport
@@ -316,7 +316,7 @@ class IBKRBroker:
                 )
                 loop.create_task(self._publish_execution(event))
             except Exception as exc:
-                logger.warning("Failed to handle commission report: %s", exc)
+                logger.warning("Failed to handle commission report: {}", exc)
 
         trade.fillEvent += _handle_fill
         trade.commissionReportEvent += _handle_commission
@@ -497,7 +497,7 @@ class IBKRBroker:
                 )
                 loop.create_task(self._publish_execution(event))
             except Exception as exc:
-                logger.warning("Failed to handle execution event: %s", exc)
+                logger.warning("Failed to handle execution event: {}", exc)
 
         def _handle_commission(
             trade_obj: Trade, fill: Fill, report: CommissionReport
@@ -522,7 +522,7 @@ class IBKRBroker:
                 )
                 loop.create_task(self._publish_execution(event))
             except Exception as exc:
-                logger.warning("Failed to handle commission report: %s", exc)
+                logger.warning("Failed to handle commission report: {}", exc)
 
         # Attach callbacks to parent order
         parent_trade.fillEvent += _handle_fill
@@ -598,16 +598,20 @@ class IBKRBroker:
             contract = SymbolContract(
                 symbol=ib_pos.contract.symbol,
                 sec_type=ib_pos.contract.secType,
-                exchange=ib_pos.contract.exchange,
+                exchange=getattr(ib_pos.contract, "exchange", "SMART"),
                 currency=ib_pos.contract.currency,
             )
 
+            avg_cost_raw = getattr(ib_pos, "avgCost", 0.0) or 0.0
+            market_value_raw = getattr(ib_pos, "marketValue", 0.0) or 0.0
+            unrealized_pnl_raw = getattr(ib_pos, "unrealizedPNL", 0.0) or 0.0
+
             position = Position(
                 contract=contract,
-                quantity=int(ib_pos.position),
-                avg_cost=Decimal(str(ib_pos.avgCost)),
-                market_value=Decimal(str(ib_pos.marketValue)),
-                unrealized_pnl=Decimal(str(ib_pos.unrealizedPNL)),
+                quantity=int(getattr(ib_pos, "position", 0)),
+                avg_cost=Decimal(str(avg_cost_raw)),
+                market_value=Decimal(str(market_value_raw)),
+                unrealized_pnl=Decimal(str(unrealized_pnl_raw)),
             )
             positions.append(position)
 

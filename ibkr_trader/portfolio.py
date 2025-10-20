@@ -82,7 +82,7 @@ class PortfolioState:
     ) -> None:
         # placeholder for realized pnl tracking; to be expanded with executions
         logger.debug(
-            "Order fill recorded: symbol=%s side=%s filled=%s avg_price=%s",
+            "Order fill recorded: symbol={} side={} filled={} avg_price={}",
             symbol,
             side,
             filled,
@@ -154,9 +154,9 @@ class PortfolioState:
             self._realized_pnl = Decimal(decoded.get("realized_pnl", "0"))
             symbol_pnl = decoded.get("symbol_pnl") or {}
             self._symbol_pnl = {symbol: Decimal(value) for symbol, value in symbol_pnl.items()}
-            logger.info("Loaded portfolio snapshot from %s", path)
+            logger.info("Loaded portfolio snapshot from {}", path)
         except Exception as exc:  # pragma: no cover - only on IO failure
-            logger.warning("Failed to load portfolio snapshot: %s", exc)
+            logger.warning("Failed to load portfolio snapshot: {}", exc)
 
     async def persist(self) -> None:
         if self._snapshot_path is None:
@@ -171,7 +171,7 @@ class PortfolioState:
                 "realized_pnl": str(self._realized_pnl),
                 "symbol_pnl": {symbol: str(value) for symbol, value in self._symbol_pnl.items()},
                 "positions": {
-                    symbol: position.model_dump()
+                    symbol: position.model_dump(mode="json")
                     for symbol, position in self.snapshot.positions.items()
                 },
             }
@@ -179,7 +179,7 @@ class PortfolioState:
             self._snapshot_path.parent.mkdir(parents=True, exist_ok=True)
             self._snapshot_path.write_text(json.dumps(data, indent=2), encoding="utf-8")
         except Exception as exc:  # pragma: no cover - only on IO failure
-            logger.warning("Failed to persist portfolio snapshot: %s", exc)
+            logger.warning("Failed to persist portfolio snapshot: {}", exc)
 
     async def trade_statistics(self) -> dict[str, str]:
         async with self._lock:
@@ -315,12 +315,12 @@ class SymbolLimitRegistry:
                 )
 
             logger.info(
-                "Loaded symbol limits for %d symbols from %s",
+                "Loaded symbol limits for {} symbols from {}",
                 len(self.symbol_limits),
                 path,
             )
         except Exception as exc:
-            logger.error("Failed to load symbol limits from %s: %s", path, exc)
+            logger.error("Failed to load symbol limits from {}: {}", path, exc)
 
     def get_limit(self, symbol: str) -> SymbolLimits | None:
         """Get limits for symbol, falling back to defaults.
@@ -370,9 +370,9 @@ class SymbolLimitRegistry:
         try:
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text(json.dumps(data, indent=2), encoding="utf-8")
-            logger.info("Saved symbol limits to %s", path)
+            logger.info("Saved symbol limits to {}", path)
         except Exception as exc:
-            logger.error("Failed to save symbol limits to %s: %s", path, exc)
+            logger.error("Failed to save symbol limits to {}: {}", path, exc)
 
     def set_symbol_limit(
         self,
@@ -391,7 +391,7 @@ class SymbolLimitRegistry:
             max_daily_loss=max_daily_loss,
             max_correlation_exposure=max_correlation_exposure,
         )
-        logger.info("Updated symbol limits for %s", symbol)
+        logger.info("Updated symbol limits for {}", symbol)
 
     def set_default_limit(
         self,
@@ -457,7 +457,7 @@ class RiskGuard:
 
         if price <= 0:
             logger.debug(
-                "Skipping exposure check for %s due to non-positive price %s",
+                "Skipping exposure check for {} due to non-positive price {}",
                 contract.symbol,
                 price,
             )

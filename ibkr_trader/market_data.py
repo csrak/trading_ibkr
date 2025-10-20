@@ -57,7 +57,7 @@ class MarketDataService:
             self._active_requests[key] += 1
             if self._active_requests[key] > SUBSCRIPTION_SOFT_LIMIT:
                 logger.warning(
-                    "Market data subscription count for %s exceeded local soft limit %s",
+                    "Market data subscription count for {} exceeded local soft limit {}",
                     key,
                     SUBSCRIPTION_SOFT_LIMIT,
                 )

@@ -120,6 +120,11 @@ class Position(BaseModel):
         """Check if position is short."""
         return self.quantity < 0
 
+    @property
+    def avg_price(self) -> Decimal:
+        """Alias for avg_cost to ease display formatting."""
+        return self.avg_cost
+
 
 class BracketOrderRequest(BaseModel):
     """Bracket order request (entry + stop loss + take profit).

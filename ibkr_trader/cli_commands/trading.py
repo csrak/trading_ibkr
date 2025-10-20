@@ -42,6 +42,7 @@ from ibkr_trader.models import (
 from ibkr_trader.portfolio import PortfolioState, RiskGuard
 from ibkr_trader.presets import get_preset, preset_names
 from ibkr_trader.safety import LiveTradingGuard
+from ibkr_trader.strategies import AdaptiveMomentumConfig, AdaptiveMomentumStrategy
 from ibkr_trader.strategy import SimpleMovingAverageStrategy, SMAConfig
 from ibkr_trader.strategy_adapters import ConfigBasedLiveStrategy
 from ibkr_trader.strategy_configs.config import load_strategy_config
@@ -96,7 +97,7 @@ async def _emit_shutdown_summary(
         for pos in positions:
             qty = pos.quantity
             symbol = pos.contract.symbol
-            avg_price = pos.avg_price
+            avg_price = getattr(pos, "avg_price", getattr(pos, "avg_cost", Decimal("0")))
             unrealized = pos.unrealized_pnl
             pnl_sign = "+" if unrealized >= 0 else ""
             logger.warning(
@@ -1188,6 +1189,12 @@ def run(
         resolve_path=True,
         help="Path to strategy config JSON (overrides default SMA parameters)",
     ),
+    strategy_choice: str = typer.Option(
+        "sma",
+        "--strategy",
+        "-y",
+        help="Strategy implementation to run (sma|adaptive_momentum|config)",
+    ),
     verbose: bool = typer.Option(
         False,
         "--verbose",
@@ -1222,12 +1229,12 @@ def run(
     logger.info(f"Symbols: {', '.join(symbols)}")
     logger.info("=" * 70)
     logger.info(
-        "Cache TTLs -> price=%s option=%s",
+        "Cache TTLs -> price={} option={}",
         format_seconds(config.training_price_cache_ttl),
         format_seconds(config.training_option_cache_ttl),
     )
     logger.info(
-        "IBKR snapshot limits -> max=%d interval=%.2fs",
+        "IBKR snapshot limits -> max={} interval={:.2f}s",
         config.training_max_snapshots,
         config.training_snapshot_interval,
     )
@@ -1263,6 +1270,18 @@ def run(
         # Paper trading - safe to proceed
         guard.acknowledge_live_trading()
 
+    valid_strategies = {"sma", "adaptive_momentum", "config"}
+    if strategy_choice not in valid_strategies:
+        logger.error(
+            "Unsupported strategy '{}'. Choose from {}",
+            strategy_choice,
+            ", ".join(sorted(valid_strategies)),
+        )
+        raise typer.Exit(code=1)
+    if strategy_choice == "config" and config_path is None:
+        logger.error("--config is required when using --strategy=config")
+        raise typer.Exit(code=1)
+
     # Run the strategy
     asyncio.run(
         run_strategy(
@@ -1273,6 +1292,7 @@ def run(
             slow_period=slow_period,
             position_size=position_size,
             config_path=config_path,
+            strategy_choice=strategy_choice,
         )
     )
 
@@ -1285,6 +1305,7 @@ async def run_strategy(
     slow_period: int,
     position_size: int,
     config_path: Path | None = None,
+    strategy_choice: str = "sma",
 ) -> None:
     """Run the trading strategy asynchronously.
 
@@ -1361,7 +1382,7 @@ async def run_strategy(
                 {symbol for node in graph_config.strategies for symbol in node.symbols}
             )
             logger.info(
-                "Loaded strategy graph '%s' with %d strategies (%s)",
+                "Loaded strategy graph '{}' with {} strategies ({})",
                 graph_config.name,
                 len(graph_config.strategies),
                 ", ".join(symbols),
@@ -1395,11 +1416,11 @@ async def run_strategy(
             )
             await coordinator.start(graph_config)
             logger.info(
-                "Strategy coordinator initialized with %d strategies",
+                "Strategy coordinator initialized with {} strategies",
                 len(coordinator.strategies),
             )
-        # Initialize strategy based on config or default SMA
-        elif config_path is not None:
+        # Initialize strategy based on config or request
+        elif config_path is not None and strategy_choice == "config":
             strat_config = load_strategy_config(config_path)
             logger.info(
                 f"Loaded strategy config: {strat_config.name} ({strat_config.strategy_type})"
@@ -1415,6 +1436,25 @@ async def run_strategy(
             logger.info(
                 f"Config-based strategy initialized: {strat_config.name} "
                 f"(type={strat_config.strategy_type}, symbol={strat_config.symbol})"
+            )
+        elif strategy_choice == "adaptive_momentum":
+            adaptive_config = AdaptiveMomentumConfig(
+                name="AdaptiveMomentum",
+                symbols=symbols,
+                position_size=position_size,
+            )
+            strategy = AdaptiveMomentumStrategy(
+                config=adaptive_config,
+                broker=broker,
+                event_bus=event_bus,
+                risk_guard=risk_guard,
+                telemetry=telemetry,
+            )
+            logger.info(
+                "Adaptive momentum strategy initialized: fast={} slow={} symbols={}",
+                adaptive_config.fast_lookback,
+                adaptive_config.slow_lookback,
+                ", ".join(adaptive_config.symbols),
             )
         else:
             # Default SMA strategy
@@ -1469,7 +1509,7 @@ async def run_strategy(
                     if isinstance(event, DiagnosticEvent):
                         logger.log(
                             event.level,
-                            "[diagnostic] %s %s",
+                            "[diagnostic] {} {}",
                             event.message,
                             event.context or "",
                         )

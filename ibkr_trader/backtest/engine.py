@@ -68,7 +68,7 @@ class BacktestEngine:
         with suppress(asyncio.CancelledError):
             await execution_task
 
-        logger.info("Backtest finished. Executions=%s", len(self.broker.execution_events))
+        logger.info("Backtest finished. Executions={}", len(self.broker.execution_events))
 
     async def _order_listener(self) -> None:
         subscription = self.event_bus.subscribe(EventTopic.ORDER_STATUS)

@@ -99,7 +99,7 @@ class CoordinatorBrokerProxy(BrokerProtocol):
 
         if max_position is not None and quantity > max_position:
             logger.warning(
-                "Coordinator clipped order quantity from %s to %s for strategy %s",
+                "Coordinator clipped order quantity from {} to {} for strategy {}",
                 quantity,
                 max_position,
                 self._strategy_id,
@@ -138,8 +138,8 @@ class CoordinatorBrokerProxy(BrokerProtocol):
                 if quantity > allowed:
                     logger.warning(
                         (
-                            "Coordinator clipped order quantity from %s to %s "
-                            "for strategy %s due to notional cap"
+                            "Coordinator clipped order quantity from {} to {} "
+                            "for strategy {} due to notional cap"
                         ),
                         quantity,
                         allowed,
@@ -383,7 +383,7 @@ class StrategyCoordinator:
             except asyncio.CancelledError:  # pragma: no cover - task cancelled during shutdown
                 raise
             except Exception as exc:  # pragma: no cover - unexpected runtime error
-                logger.error("Failed to process order intent %s: %s", intent, exc)
+                logger.error("Failed to process order intent {}: {}", intent, exc)
                 if self._telemetry is not None:
                     self._telemetry.error(
                         "coordinator.intent_error",
@@ -400,7 +400,7 @@ class StrategyCoordinator:
     async def _handle_intent(self, intent: OrderIntent) -> None:
         context = self._contexts.get(intent.strategy_id)
         if context is None:
-            logger.warning("Received intent for unknown strategy %s", intent.strategy_id)
+            logger.warning("Received intent for unknown strategy {}", intent.strategy_id)
             return
 
         if self._telemetry is not None:
@@ -420,7 +420,7 @@ class StrategyCoordinator:
         elif intent.intent_type == MARKET_DELTA:
             delta = intent.quantity
         else:
-            logger.warning("Unsupported intent type '%s'", intent.intent_type)
+            logger.warning("Unsupported intent type '{}'", intent.intent_type)
             return
 
         if delta == 0:
@@ -483,5 +483,5 @@ class StrategyCoordinator:
         try:
             return event.price if isinstance(event.price, Decimal) else Decimal(str(event.price))
         except Exception:  # pragma: no cover - defensive conversion
-            logger.debug("Unable to resolve price from last event for %s", symbol)
+            logger.debug("Unable to resolve price from last event for {}", symbol)
             return None

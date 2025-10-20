@@ -82,7 +82,7 @@ def build_portfolio_and_risk_guard(
         matrix = CorrelationMatrix.load(matrix_path)
         if matrix is None:
             logger.debug(
-                "No correlation matrix found at %s; correlation guard disabled",
+                "No correlation matrix found at {}; correlation guard disabled",
                 matrix_path,
             )
         else:
@@ -95,7 +95,7 @@ def build_portfolio_and_risk_guard(
                 )
             except ValueError as exc:
                 logger.warning(
-                    "Correlation guard disabled due to invalid configuration: %s",
+                    "Correlation guard disabled due to invalid configuration: {}",
                     exc,
                 )
 
@@ -292,8 +292,8 @@ def emit_run_summary(
     )
 
     if summary.recommended_actions:
-        logger.info("Recommended actions (%s):", label)
+        logger.info("Recommended actions ({}):", label)
         for action in summary.recommended_actions:
-            logger.info("  - %s", action)
+            logger.info("  - {}", action)
     if summary.trade_stats:
-        logger.info("Trade statistics (%s): %s", label, summary.trade_stats)
+        logger.info("Trade statistics ({}): {}", label, summary.trade_stats)
