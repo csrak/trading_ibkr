@@ -257,6 +257,59 @@ class TrailingStopConfig(BaseModel):
         return v
 
 
+class OCOOrderRequest(BaseModel):
+    """One-Cancels-Other order pair.
+
+    An OCO order consists of two orders where if one fills, the other is
+    automatically cancelled. Useful for entering positions at different price
+    levels or managing exits.
+
+    Common use cases:
+    - Enter long OR short (bracket around consolidation)
+    - Take profit at target OR stop loss (alternative to bracket)
+    - Scale out at multiple levels
+
+    Note: IBKR uses native exchange OCO when possible. For manual OCO,
+    there's a small race condition where both orders could fill in fast markets.
+    """
+
+    order_a: OrderRequest = Field(..., description="First order in OCO pair")
+    order_b: OrderRequest = Field(..., description="Second order in OCO pair")
+    group_id: str = Field(..., description="Unique identifier for this OCO pair")
+
+    @field_validator("order_b")
+    @classmethod
+    def validate_same_symbol(cls, v: OrderRequest, info: ValidationInfo) -> OrderRequest:
+        """Ensure both orders are for the same symbol."""
+        order_a = info.data.get("order_a")
+        if order_a and v.contract.symbol != order_a.contract.symbol:
+            raise ValueError(
+                f"Both orders must be for same symbol: "
+                f"order_a={order_a.contract.symbol}, order_b={v.contract.symbol}"
+            )
+        return v
+
+    @field_validator("order_b")
+    @classmethod
+    def validate_same_quantity(cls, v: OrderRequest, info: ValidationInfo) -> OrderRequest:
+        """Ensure both orders have the same quantity."""
+        order_a = info.data.get("order_a")
+        if order_a and v.quantity != order_a.quantity:
+            raise ValueError(
+                f"Both orders must have same quantity: "
+                f"order_a={order_a.quantity}, order_b={v.quantity}"
+            )
+        return v
+
+    @field_validator("group_id")
+    @classmethod
+    def validate_group_id(cls, v: str) -> str:
+        """Ensure group_id is non-empty."""
+        if not v or not v.strip():
+            raise ValueError("group_id cannot be empty")
+        return v.strip()
+
+
 class MarketData(BaseModel):
     """Real-time market data."""
 

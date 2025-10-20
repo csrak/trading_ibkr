@@ -28,6 +28,7 @@ from ibkr_trader.events import (
 from ibkr_trader.market_data import MarketDataService, SubscriptionRequest
 from ibkr_trader.models import (
     BracketOrderRequest,
+    OCOOrderRequest,
     OrderRequest,
     OrderSide,
     OrderType,
@@ -816,6 +817,240 @@ async def create_trailing_stop(
         )
     finally:
         await trailing_manager.stop()
+        await broker.disconnect()
+
+
+@trading_app.command("oco-order")
+def oco_order_command(
+    symbol: str = typer.Option(..., "--symbol", "-s", help="Symbol to trade"),
+    quantity: int = typer.Option(
+        1,
+        "--quantity",
+        "-q",
+        min=1,
+        help="Order quantity (must be same for both orders)",
+    ),
+    order_a_side: OrderSide = typer.Option(
+        ...,
+        "--order-a-side",
+        help="First order side (BUY or SELL)",
+    ),
+    order_a_type: OrderType = typer.Option(
+        OrderType.LIMIT,
+        "--order-a-type",
+        help="First order type (LIMIT/STOP)",
+    ),
+    order_a_price: str = typer.Option(
+        ...,
+        "--order-a-price",
+        help="First order limit/stop price",
+    ),
+    order_b_side: OrderSide = typer.Option(
+        ...,
+        "--order-b-side",
+        help="Second order side (BUY or SELL)",
+    ),
+    order_b_type: OrderType = typer.Option(
+        OrderType.LIMIT,
+        "--order-b-type",
+        help="Second order type (LIMIT/STOP)",
+    ),
+    order_b_price: str = typer.Option(
+        ...,
+        "--order-b-price",
+        help="Second order limit/stop price",
+    ),
+    group_id: str | None = typer.Option(
+        None,
+        "--group-id",
+        help="Optional OCO group identifier (auto-generated if not provided)",
+    ),
+) -> None:
+    """Submit an OCO (One-Cancels-Other) order pair for paper trading.
+
+    An OCO order consists of two orders where if one fills, the other is
+    automatically cancelled. Useful for entering positions at different price
+    levels or managing exits.
+
+    Common use cases:
+    - Enter long OR short (bracket around consolidation)
+    - Take profit at target OR stop loss (alternative to bracket)
+    - Scale out at multiple levels
+
+    Example (bracket entry - enter at 145 OR 155):
+      ibkr-trader oco-order --symbol AAPL --quantity 10 \\
+        --order-a-side BUY --order-a-type LIMIT --order-a-price 145.00 \\
+        --order-b-side BUY --order-b-type LIMIT --order-b-price 155.00
+
+    Example (exit management - stop loss OR take profit):
+      ibkr-trader oco-order --symbol AAPL --quantity 10 \\
+        --order-a-side SELL --order-a-type STOP --order-a-price 145.00 \\
+        --order-b-side SELL --order-b-type LIMIT --order-b-price 155.00
+
+    NOTE: This command creates the OCO pair but does not monitor it.
+    You must run 'ibkr-trader run' or integrate OCOOrderManager in your strategy
+    to enable continuous monitoring.
+    """
+    from ibkr_trader.cli_commands.utils import setup_logging
+
+    config = load_config()
+    setup_logging(config.log_dir, verbose=False)
+
+    if config.trading_mode != TradingMode.PAPER:
+        logger.error(
+            "oco-order command is restricted to PAPER trading mode. "
+            "Set IBKR_TRADING_MODE=paper before running this command."
+        )
+        raise typer.Exit(code=1)
+
+    # Parse prices
+    try:
+        order_a_price_decimal = Decimal(order_a_price)
+        order_b_price_decimal = Decimal(order_b_price)
+    except (InvalidOperation, ValueError) as exc:
+        raise typer.BadParameter("Invalid price format") from exc
+
+    # Generate group ID if not provided
+    if group_id is None:
+        group_id = f"OCO_{symbol}_{datetime.now(UTC).strftime('%Y%m%d_%H%M%S')}"
+
+    # Create broker components
+    guard = LiveTradingGuard(config=config, live_flag_enabled=False)
+    snapshot_path = config.data_dir / DEFAULT_PORTFOLIO_SNAPSHOT.name
+    portfolio = PortfolioState(
+        Decimal(str(config.max_daily_loss)),
+        snapshot_path=snapshot_path,
+    )
+    risk_guard = RiskGuard(
+        portfolio=portfolio,
+        max_exposure=Decimal(str(config.max_order_exposure)),
+    )
+    guard.acknowledge_live_trading()
+
+    try:
+        asyncio.run(
+            create_oco_order(
+                config=config,
+                guard=guard,
+                risk_guard=risk_guard,
+                symbol=symbol,
+                quantity=quantity,
+                order_a_side=order_a_side,
+                order_a_type=order_a_type,
+                order_a_price=order_a_price_decimal,
+                order_b_side=order_b_side,
+                order_b_type=order_b_type,
+                order_b_price=order_b_price_decimal,
+                group_id=group_id,
+            )
+        )
+    except Exception as exc:  # pragma: no cover - surface detailed CLI error
+        logger.error(f"Failed to create OCO order: {exc}")
+        raise typer.Exit(code=1) from exc
+
+
+async def create_oco_order(
+    config: "IBKRConfig",  # noqa: F821
+    guard: LiveTradingGuard,
+    risk_guard: RiskGuard,
+    symbol: str,
+    quantity: int,
+    order_a_side: OrderSide,
+    order_a_type: OrderType,
+    order_a_price: Decimal,
+    order_b_side: OrderSide,
+    order_b_type: OrderType,
+    order_b_price: Decimal,
+    group_id: str,
+) -> None:
+    """Create an OCO order pair."""
+    from ibkr_trader.oco_orders import OCOOrderManager
+
+    event_bus = EventBus()
+    broker = IBKRBroker(config=config, guard=guard, event_bus=event_bus, risk_guard=risk_guard)
+    state_file = config.data_dir / "oco_orders.json"
+    oco_manager = OCOOrderManager(
+        broker=broker,
+        event_bus=event_bus,
+        state_file=state_file,
+    )
+
+    try:
+        await broker.connect()
+        await oco_manager.start()
+
+        # Create order A
+        order_a_limit = (
+            order_a_price if order_a_type in (OrderType.LIMIT, OrderType.STOP_LIMIT) else None
+        )
+        order_a_stop = (
+            order_a_price if order_a_type in (OrderType.STOP, OrderType.STOP_LIMIT) else None
+        )
+        order_a = OrderRequest(
+            contract=SymbolContract(symbol=symbol),
+            side=order_a_side,
+            quantity=quantity,
+            order_type=order_a_type,
+            limit_price=order_a_limit,
+            stop_price=order_a_stop,
+            expected_price=order_a_price,
+        )
+
+        # Create order B
+        order_b_limit = (
+            order_b_price if order_b_type in (OrderType.LIMIT, OrderType.STOP_LIMIT) else None
+        )
+        order_b_stop = (
+            order_b_price if order_b_type in (OrderType.STOP, OrderType.STOP_LIMIT) else None
+        )
+        order_b = OrderRequest(
+            contract=SymbolContract(symbol=symbol),
+            side=order_b_side,
+            quantity=quantity,
+            order_type=order_b_type,
+            limit_price=order_b_limit,
+            stop_price=order_b_stop,
+            expected_price=order_b_price,
+        )
+
+        # Create OCO request
+        oco_request = OCOOrderRequest(
+            order_a=order_a,
+            order_b=order_b,
+            group_id=group_id,
+        )
+
+        result_group_id = await oco_manager.place_oco_order(oco_request)
+
+        logger.info("=" * 70)
+        logger.info("OCO ORDER CREATED")
+        logger.info("=" * 70)
+        logger.info(f"Group ID: {result_group_id}")
+        logger.info(f"Symbol: {symbol}")
+        logger.info(f"Quantity: {quantity}")
+        logger.info("")
+        logger.info("Order A:")
+        logger.info(f"  Side: {order_a_side.value}")
+        logger.info(f"  Type: {order_a_type.value}")
+        logger.info(f"  Price: ${order_a_price}")
+        logger.info("")
+        logger.info("Order B:")
+        logger.info(f"  Side: {order_b_side.value}")
+        logger.info(f"  Type: {order_b_type.value}")
+        logger.info(f"  Price: ${order_b_price}")
+        logger.info("=" * 70)
+        logger.info("")
+        logger.warning(
+            "⚠ NOTE: This OCO pair has been created but will NOT be monitored "
+            "after this command exits."
+        )
+        logger.warning(
+            "To enable continuous monitoring, you must run a strategy "
+            "that integrates OCOOrderManager, or use 'ibkr-trader run' with "
+            "appropriate configuration."
+        )
+    finally:
+        await oco_manager.stop()
         await broker.disconnect()
 
 
