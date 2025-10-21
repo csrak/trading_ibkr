@@ -9,9 +9,9 @@ from decimal import ROUND_DOWN, Decimal
 from loguru import logger
 
 from ibkr_trader.base_strategy import BrokerProtocol
+from ibkr_trader.core import EventBus
 from ibkr_trader.data import Screener
-from ibkr_trader.events import EventBus
-from ibkr_trader.portfolio import RiskGuard
+from ibkr_trader.risk import RiskGuard
 from ibkr_trader.strategy import Strategy
 from ibkr_trader.telemetry import TelemetryReporter
 
@@ -156,18 +156,16 @@ class AdaptiveMomentumStrategy(Strategy):
             logger.warning("Screener returned empty universe; retaining previous symbols")
             return
         self._symbols = new_symbols
-        self._price_history = {
-            symbol: self._price_history.get(symbol, deque(maxlen=self._history_maxlen))
-            for symbol in new_symbols
-        }
-        self._high_history = {
-            symbol: self._high_history.get(symbol, deque(maxlen=self._history_maxlen))
-            for symbol in new_symbols
-        }
-        self._low_history = {
-            symbol: self._low_history.get(symbol, deque(maxlen=self._history_maxlen))
-            for symbol in new_symbols
-        }
+
+        def _ensure_buffers(store: dict[str, deque[Decimal]]) -> dict[str, deque[Decimal]]:
+            updated: dict[str, deque[Decimal]] = {}
+            for sym in new_symbols:
+                updated[sym] = store.get(sym, deque(maxlen=self._history_maxlen))
+            return updated
+
+        self._price_history = _ensure_buffers(self._price_history)
+        self._high_history = _ensure_buffers(self._high_history)
+        self._low_history = _ensure_buffers(self._low_history)
         self._last_screen_update = result.generated_at
         if self._telemetry is not None:
             self._telemetry.info(

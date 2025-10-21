@@ -1,5 +1,7 @@
 """Trading commands for IBKR Personal Trader."""
 
+from __future__ import annotations
+
 import asyncio
 from contextlib import AbstractAsyncContextManager, suppress
 from datetime import UTC, datetime
@@ -9,7 +11,6 @@ from pathlib import Path
 import typer
 from loguru import logger
 
-from ibkr_trader.broker import IBKRBroker
 from ibkr_trader.cli_commands.utils import (
     build_portfolio_and_risk_guard,
     load_symbol_limit_registry,
@@ -22,6 +23,7 @@ from ibkr_trader.constants import (
     MOCK_PRICE_SLEEP_SECONDS,
     MOCK_PRICE_VARIATION_MODULO,
 )
+from ibkr_trader.data import LiquidityScreener, LiquidityScreenerConfig
 from ibkr_trader.events import (
     DiagnosticEvent,
     EventBus,
@@ -29,6 +31,7 @@ from ibkr_trader.events import (
     ExecutionEvent,
     OrderStatusEvent,
 )
+from ibkr_trader.execution import IBKRBroker
 from ibkr_trader.market_data import MarketDataService, SubscriptionRequest
 from ibkr_trader.models import (
     BracketOrderRequest,
@@ -55,7 +58,7 @@ trading_app = typer.Typer()
 
 
 async def _emit_shutdown_summary(
-    config: "IBKRConfig",  # noqa: F821
+    config: IBKRConfig,  # noqa: F821
     portfolio: PortfolioState,
     broker: IBKRBroker,
     run_label: str,
@@ -115,7 +118,7 @@ async def _emit_shutdown_summary(
 
 
 async def submit_single_order(
-    config: "IBKRConfig",  # noqa: F821
+    config: IBKRConfig,  # noqa: F821
     guard: LiveTradingGuard,
     contract: SymbolContract,
     side: OrderSide,
@@ -172,7 +175,7 @@ def status() -> None:
     asyncio.run(check_status(config))
 
 
-async def check_status(config: "IBKRConfig") -> None:  # noqa: F821
+async def check_status(config: IBKRConfig) -> None:  # noqa: F821
     """Check status asynchronously."""
     guard = LiveTradingGuard(config=config, live_flag_enabled=False)
     broker = IBKRBroker(config=config, guard=guard)
@@ -523,7 +526,7 @@ def bracket_order(
 
 
 async def submit_bracket_order(
-    config: "IBKRConfig",  # noqa: F821
+    config: IBKRConfig,  # noqa: F821
     guard: LiveTradingGuard,
     risk_guard: RiskGuard,
     symbol: str,
@@ -740,7 +743,7 @@ def trailing_stop_command(
 
 
 async def create_trailing_stop(
-    config: "IBKRConfig",  # noqa: F821
+    config: IBKRConfig,  # noqa: F821
     guard: LiveTradingGuard,
     risk_guard: RiskGuard,
     trailing_config: TrailingStopConfig,
@@ -915,7 +918,7 @@ def oco_order_command(
 
 
 async def create_oco_order(
-    config: "IBKRConfig",  # noqa: F821
+    config: IBKRConfig,  # noqa: F821
     guard: LiveTradingGuard,
     risk_guard: RiskGuard,
     symbol: str,
@@ -1195,6 +1198,21 @@ def run(
         "-y",
         help="Strategy implementation to run (sma|adaptive_momentum|config)",
     ),
+    screener_refresh_seconds: int | None = typer.Option(
+        None,
+        "--screener-refresh-seconds",
+        help="Override refresh interval for screener-driven strategies (seconds).",
+    ),
+    liquidity_min_dollar_volume: float | None = typer.Option(
+        None,
+        "--min-dollar-volume",
+        help="Minimum average daily dollar volume for liquidity screener.",
+    ),
+    liquidity_min_price: float | None = typer.Option(
+        None,
+        "--min-price",
+        help="Minimum share price for liquidity screener.",
+    ),
     verbose: bool = typer.Option(
         False,
         "--verbose",
@@ -1293,12 +1311,15 @@ def run(
             position_size=position_size,
             config_path=config_path,
             strategy_choice=strategy_choice,
+            screener_refresh_seconds=screener_refresh_seconds,
+            liquidity_min_dollar_volume=liquidity_min_dollar_volume,
+            liquidity_min_price=liquidity_min_price,
         )
     )
 
 
 async def run_strategy(
-    config: "IBKRConfig",  # noqa: F821
+    config: IBKRConfig,  # noqa: F821
     guard: LiveTradingGuard,
     symbols: list[str],
     fast_period: int,
@@ -1306,6 +1327,9 @@ async def run_strategy(
     position_size: int,
     config_path: Path | None = None,
     strategy_choice: str = "sma",
+    screener_refresh_seconds: int | None = None,
+    liquidity_min_dollar_volume: float | None = None,
+    liquidity_min_price: float | None = None,
 ) -> None:
     """Run the trading strategy asynchronously.
 
@@ -1340,6 +1364,7 @@ async def run_strategy(
     )
     market_data = MarketDataService(event_bus=event_bus)
     portfolio, risk_guard, symbol_limits = build_portfolio_and_risk_guard(config)
+    screener_task: asyncio.Task[None] | None = None
     broker = IBKRBroker(
         config=config,
         guard=guard,
@@ -1440,7 +1465,7 @@ async def run_strategy(
         elif strategy_choice == "adaptive_momentum":
             adaptive_config = AdaptiveMomentumConfig(
                 name="AdaptiveMomentum",
-                symbols=symbols,
+                symbols=[s.upper() for s in symbols],
                 position_size=position_size,
             )
             strategy = AdaptiveMomentumStrategy(
@@ -1456,6 +1481,39 @@ async def run_strategy(
                 adaptive_config.slow_lookback,
                 ", ".join(adaptive_config.symbols),
             )
+
+            refresh_interval = (
+                screener_refresh_seconds
+                if screener_refresh_seconds is not None
+                else adaptive_config.screener_refresh_seconds
+            )
+            default_screen_cfg = LiquidityScreenerConfig()
+            screener_config = LiquidityScreenerConfig(
+                minimum_dollar_volume=Decimal(str(liquidity_min_dollar_volume))
+                if liquidity_min_dollar_volume is not None
+                else default_screen_cfg.minimum_dollar_volume,
+                minimum_price=Decimal(str(liquidity_min_price))
+                if liquidity_min_price is not None
+                else default_screen_cfg.minimum_price,
+                universe=[s.upper() for s in symbols],
+                max_symbols=max(len(symbols), adaptive_config.max_open_positions * 2),
+                lookback_days=default_screen_cfg.lookback_days,
+            )
+            screener = LiquidityScreener(screener_config)
+            strategy.set_screener(screener)
+            await strategy.refresh_universe()
+
+            if refresh_interval and refresh_interval > 0:
+
+                async def _screener_loop() -> None:
+                    while True:
+                        await asyncio.sleep(refresh_interval)
+                        try:
+                            await strategy.refresh_universe()
+                        except Exception as exc:  # pragma: no cover - logging only
+                            logger.error("Screener refresh failed: {}", exc)
+
+                screener_task = asyncio.create_task(_screener_loop())
         else:
             # Default SMA strategy
             strategy_config = SMAConfig(
@@ -1544,6 +1602,10 @@ async def run_strategy(
         logger.error(f"Error during execution: {e}")
         raise
     finally:
+        if screener_task is not None:
+            screener_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await screener_task
         if coordinator is not None:
             await coordinator.stop()
         if strategy is not None:

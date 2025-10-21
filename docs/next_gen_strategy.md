@@ -69,19 +69,15 @@ MarketDataService → AdaptiveMomentumStrategy → OrderIntent → StrategyCoord
 3. **Event-Based Flags (Future)**  
    - Earnings calendar, news sentiment, abnormal volume alerts.
 
+(We will keep expanding this roadmap as each piece ships—please treat this document as a living tracker.)
+
 ## 5. Incremental Delivery Plan
 
-1. **Sprint 1 (current)**  
-   - Implement strategy scaffolding + config.  
-   - Integrate simple liquidity screener.  
-   - Emit telemetry + risk hooks.
-
-2. **Sprint 2**  
-   - Flesh out signal calculations, add fee-aware filters, backtest harness.  
-   - Dashboard additions (signal + screener panels).
-
-3. **Sprint 3**  
-   - Production hardening: screen refresh scheduling, additional tests, documentation.
+| Sprint | Scope                                                                                                 | Status    | Notes/Next Actions                                                         |
+| ------ | ------------------------------------------------------------------------------------------------------ | --------- | --------------------------------------------------------------------------- |
+| 1      | Strategy scaffolding, config, basic telemetry, liquidity screener placeholder                         | ✅ Done    | Delivered adaptive momentum skeleton and CLI wiring                        |
+| 2      | Wire screener into runtime, integrate ATR/VWAP feeds, add fee-aware filters, enhanced telemetry       | 🚧 Ongoing | Next: build screener scheduler, hook edge calculations to real inputs       |
+| 3      | Adaptive sizing, session kill switch, local runbook, backtest validation, expanded dashboard          | Planned   | To schedule once Sprint 2 stabilizes                                        |
 
 ## 6. Testing Plan
 
@@ -91,9 +87,9 @@ MarketDataService → AdaptiveMomentumStrategy → OrderIntent → StrategyCoord
 
 ## 7. Documentation Tasks
 
-- Update `docs/strategy_quick_start.md` with new strategy usage.
-- Document screener CLI/API.
-- Provide runbook snippet for monitoring telemetry warnings.
+- ✅ Added adaptive momentum CLI usage to `README.md` (Sprint 1)
+- 🔄 Update `docs/strategy_quick_start.md` once screener scheduling lands (Sprint 2)
+- 🔄 Document screener CLI/API and runbook snippets (Sprint 3)
 
 ---
 
