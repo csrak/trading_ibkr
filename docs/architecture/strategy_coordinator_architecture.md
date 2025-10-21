@@ -174,7 +174,7 @@ Each phase should land in manageable PR-sized chunks (<400 LOC) with focused tes
 - **Documentation**
   - Update `README.md` strategy section with coordinator overview and sample graph config snippet.
   - Extend `QUICKSTART.md` with instructions for running multiple strategies (paper mode).
-  - Add `docs/strategy_coordinator_architecture.md` reference to `docs/README.md` (if present) for discoverability.
+  - Add `docs/architecture/strategy_coordinator_architecture.md` reference to `docs/README.md` (if present) for discoverability.
 
 - **Operational Notes**
   - Include telemetry field additions in `docs/telemetry.md` (create if missing).

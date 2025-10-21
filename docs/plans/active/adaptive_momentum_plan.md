@@ -2,6 +2,7 @@
 
 **Date:** 2025-10-20  
 **Owner:** Trading Platform Team  
+**Status:** Sprint 2 ongoing (see Section 5)
 
 ## 1. Objectives
 
@@ -88,7 +89,7 @@ MarketDataService → AdaptiveMomentumStrategy → OrderIntent → StrategyCoord
 ## 7. Documentation Tasks
 
 - ✅ Added adaptive momentum CLI usage to `README.md` (Sprint 1)
-- 🔄 Update `docs/strategy_quick_start.md` once screener scheduling lands (Sprint 2)
+- 🔄 Update `../../guides/strategies/strategy_quick_start.md` once screener scheduling lands (Sprint 2)
 - 🔄 Document screener CLI/API and runbook snippets (Sprint 3)
 
 ---

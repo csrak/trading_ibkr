@@ -415,6 +415,6 @@ uv run pytest tests/test_trailing_stops.py::test_trailing_stop_long_position_rai
 ## See Also
 
 - [Bracket Orders Guide](bracket_orders_guide.md) - Entry + stop loss + take profit
-- [Strategy Quick Start](strategy_quick_start.md) - Building custom strategies
-- [README](../README.md) - Full platform documentation
-- [Trailing Stop Manager](../ibkr_trader/execution/trailing_stops.py) - Implementation details
+- [Strategy Quick Start](../strategies/strategy_quick_start.md) - Building custom strategies
+- [README](../../../README.md) - Full platform documentation
+- [Trailing Stop Manager](../../../ibkr_trader/execution/trailing_stops.py) - Implementation details

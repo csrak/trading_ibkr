@@ -86,6 +86,25 @@ git config core.hooksPath .githooks
 - When running long-lived CLI commands (e.g., `ibkr-trader run …`) from automation or shared terminals, wrap the invocation with a timeout (`timeout`, `uv --timeout`, etc.) so sessions never continue unattended.
 - Always call out active runs in status updates and confirm they have been stopped (or hand off responsibility) before ending a coding session.
 
+## Workflow Checklist
+
+Before handing work off (commit, PR, or session end), always:
+
+1. Run `./linter.sh`
+2. Run `uv run pytest`
+3. Update or create documentation as needed and mention any skipped verifications explicitly in your notes
+
+## Documentation Taxonomy
+
+- Only `README.md`, `QUICKSTART.md`, and `CLAUDE.md` live at the repo root; all other documentation belongs under `docs/`
+- Use the existing folders when adding material:
+  - `docs/guides/strategies`, `docs/guides/trading`, `docs/guides/operations`, `docs/guides/data`
+  - `docs/architecture` for design deep dives
+  - `docs/plans/active` and `docs/plans/completed` for roadmaps and retros
+  - `docs/status` for progress trackers and dashboards
+  - `docs/market_making` for research notes specific to market-depth strategies
+- Keep `docs/README.md` in sync with any new or relocated files so the documentation index stays accurate
+
 ## Architecture Overview
 
 The codebase follows a clean, event-driven architecture with clear separation of concerns:
@@ -306,7 +325,7 @@ Training (optional):
 ## Additional Resources
 
 - [Quick Start Guide](QUICKSTART.md) - Installation and first trades
-- [Monitoring Guide](docs/monitoring_guide.md) - Real-time dashboards and session analysis
-- [Model Training Guide](docs/model_training_guide.md) - Data caching and ML workflows
-- [Strategy Guide](docs/unified_strategy_guide.md) - Complete strategy development reference
-- [Order Book Implementation](docs/order_book_implementation.md) - L2 market depth integration
+- [Monitoring Guide](docs/guides/operations/monitoring_guide.md) - Real-time dashboards and session analysis
+- [Model Training Guide](docs/guides/data/model_training_guide.md) - Data caching and ML workflows
+- [Strategy Guide](docs/guides/strategies/unified_strategy_guide.md) - Complete strategy development reference
+- [Order Book Implementation](docs/architecture/order_book_implementation.md) - L2 market depth integration

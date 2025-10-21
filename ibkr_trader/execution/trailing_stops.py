@@ -344,19 +344,20 @@ class TrailingStopManager:
         # Note: broker doesn't have modify_order yet, this would be the interface:
         # await self.broker.modify_order(trailing_stop.order_id, stop_price=new_stop_price)
 
-        # For now, log the intended modification
-        logger.info(
-            "Trailing stop {} updated: {} -> {}",
-            trailing_stop.stop_id,
-            trailing_stop.current_stop_price,
-            new_stop_price,
-        )
-
-        # Update state
+        # Update state before logging so any logging sink issues do not break logic.
         trailing_stop.current_stop_price = new_stop_price
         trailing_stop.last_update_time = now
         self._rate_limiters[symbol] = now
         self._save_state()
+
+        # For now, log the intended modification (best effort).
+        with suppress(Exception):  # Logging failure should not block trailing updates.
+            logger.info(
+                "Trailing stop {} updated: {} -> {}",
+                trailing_stop.stop_id,
+                trailing_stop.current_stop_price,
+                new_stop_price,
+            )
 
     def _save_state(self) -> None:
         """Persist active trailing stops to disk."""

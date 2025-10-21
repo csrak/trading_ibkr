@@ -456,19 +456,19 @@ class OrderManagementPanel:
 ## Documentation Plan
 
 ### User-Facing Documentation
-1. **Advanced Order Types Guide** (new file: `docs/advanced_orders.md`)
+1. **Advanced Order Types Guide** (new file under `../guides/trading/advanced_orders.md`)
    - Bracket orders with examples
    - Trailing stops with different configurations
    - OCO orders with use cases
 
-2. **Risk Management Guide** (new file: `docs/risk_management.md`)
+2. **Risk Management Guide** (new file updates: `../guides/operations/risk_management.md`)
    - Per-symbol limits configuration
    - Correlation-based risk explanation
    - Portfolio-level risk controls
 
 3. **Update Existing Docs**
-   - `docs/monitoring_guide.md` - Add order management section
-   - `docs/strategy_guide.md` - Add advanced order examples
+   - `../guides/operations/monitoring_guide.md` - Add order management section
+   - `../guides/strategies/unified_strategy_guide.md` - Add advanced order examples
    - `examples/README.md` - Add bracket order workflow
 
 ### Developer Documentation

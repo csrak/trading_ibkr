@@ -21,9 +21,9 @@
 **Deliverables:**
 - `ibkr_trader/base_strategy.py` - Protocol-based strategy interface
 - `examples/` - Complete workflow examples (train → backtest → trade)
-- `docs/unified_strategy_guide.md` - Complete strategy development reference
-- `docs/strategy_quick_start.md` - Templates and quick reference
-- `docs/order_book_implementation.md` - L2 market depth integration
+- `../guides/strategies/unified_strategy_guide.md` - Complete strategy development reference
+- `../guides/strategies/strategy_quick_start.md` - Templates and quick reference
+- `../architecture/order_book_implementation.md` - L2 market depth integration
 
 **Impact:** Users can now write portable strategies that work across live, paper, backtest, and replay environments.
 
@@ -44,8 +44,8 @@
 - `ibkr_trader/dashboard.py` - Real-time terminal UI with rich library
 - Enhanced `ibkr-trader run` with graceful Ctrl+C shutdown
 - Enhanced `ibkr-trader session-status` with trade performance metrics
-- `docs/monitoring_guide.md` - Complete monitoring reference (650+ lines)
-- `docs/README.md` - Documentation index
+- `../guides/operations/monitoring_guide.md` - Complete monitoring reference (650+ lines)
+- `../README.md` - Documentation index
 
 **Impact:** Users have visibility at every stage: during trading (dashboard), at shutdown (final summary), and post-session (enhanced metrics).
 

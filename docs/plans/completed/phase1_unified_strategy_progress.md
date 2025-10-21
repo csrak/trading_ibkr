@@ -1,5 +1,7 @@
 # Phase 1: Unified Strategy Interface - Progress Tracker
 
+**Status:** Completed (2025-10-17)
+
 ## Goal
 Enable expert traders to train → backtest → live test → live trade with ANY strategy, not just SMA.
 
@@ -51,8 +53,8 @@ Enable expert traders to train → backtest → live test → live trade with AN
 - [x] Type checking passing
 
 #### 2d. Documentation
-- [x] Created `docs/unified_strategy_guide.md` (16KB comprehensive guide)
-- [x] Created `docs/strategy_quick_start.md` (10KB templates & examples)
+- [x] Created `../../guides/strategies/unified_strategy_guide.md` (16KB comprehensive guide)
+- [x] Created `../../guides/strategies/strategy_quick_start.md` (10KB templates & examples)
 
 **Commits:**
 - `32e86ca` - "Phase 1 Step 2: Unified BaseStrategy interface"
@@ -187,7 +189,7 @@ None - Ready for Step 5
 **Tasks:**
 - [ ] Add unified strategy interface section
 - [ ] Update architecture overview with `BaseStrategy` / `BrokerProtocol`
-- [ ] Add references to new docs (`unified_strategy_guide.md`, `strategy_quick_start.md`)
+- [ ] Add references to new docs (`../../guides/strategies/unified_strategy_guide.md`, `../../guides/strategies/strategy_quick_start.md`)
 
 **Estimated Time:** 30 minutes
 
@@ -282,7 +284,7 @@ When resuming Phase 1 work:
 2. ✅ Check out latest `main` branch
 3. ✅ Run `./linter.sh` to verify clean state
 4. ✅ Run `uv run pytest` to verify tests pass
-5. ✅ Read `docs/unified_strategy_guide.md` for context
+5. ✅ Read `../../guides/strategies/unified_strategy_guide.md` for context
 6. ⬜ Start with Step 3: Add tests for unified interface
 7. ⬜ Proceed through Steps 4-10 sequentially
 
@@ -291,10 +293,10 @@ When resuming Phase 1 work:
 ## Resources
 
 ### Documentation
-- **Unified Strategy Guide:** `docs/unified_strategy_guide.md`
-- **Quick Start Templates:** `docs/strategy_quick_start.md`
-- **Repository Guidance:** `CLAUDE.md`
-- **Model Training:** `docs/model_training_guide.md`
+- **Unified Strategy Guide:** `../../guides/strategies/unified_strategy_guide.md`
+- **Quick Start Templates:** `../../guides/strategies/strategy_quick_start.md`
+- **Repository Guidance:** `../../../CLAUDE.md`
+- **Model Training:** `../../guides/data/model_training_guide.md`
 
 ### Key Files
 - **Base abstractions:** `ibkr_trader/base_strategy.py`

@@ -11,7 +11,7 @@ USAGE:
 
 REQUIREMENTS:
     - L2 order book data (requires IBKR market depth subscription)
-    - See docs/order_book_implementation.md for setup
+    - See docs/architecture/order_book_implementation.md for setup
 """
 
 from __future__ import annotations
@@ -215,7 +215,7 @@ if __name__ == "__main__":
         print("\n=== Test complete! ===")
         print(
             "\nProduction deployment requires:"
-            "\n1. L2 order book subscription (see docs/order_book_implementation.md)"
+            "\n1. L2 order book subscription (see docs/architecture/order_book_implementation.md)"
             "\n2. Order ID tracking for cancellation"
             "\n3. Fill handling with on_execution callback"
             "\n4. Risk controls (max loss, daily limits)"

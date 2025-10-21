@@ -700,7 +700,7 @@ ibkr-trader backtest data/AAPL_2024.csv --strategy sma
 
 ## See Also
 
-- [Quick Start Guide](../QUICKSTART.md) - Platform setup
-- [Strategy Guide](unified_strategy_guide.md) - Writing strategies
-- [CLI Reference](../CLAUDE.md) - All commands
-- [Safety Guide](../CLAUDE.md#safety-philosophy) - Risk controls
+- [Quick Start Guide](../../../QUICKSTART.md) - Platform setup
+- [Strategy Guide](../strategies/unified_strategy_guide.md) - Writing strategies
+- [CLI Reference](../../../CLAUDE.md) - All commands
+- [Safety Guide](../../../CLAUDE.md#safety-philosophy) - Risk controls

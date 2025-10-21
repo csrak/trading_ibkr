@@ -627,9 +627,9 @@ async def on_bar(self, symbol: str, price: Decimal, broker: BrokerProtocol) -> N
 
 ## Next Steps
 
-- **Step 3:** [Extend CLI to support --config parameter](./cli_config_guide.md) (coming soon)
-- **Step 4:** [Run advanced strategies live](./advanced_strategies_live.md) (coming soon)
-- **Examples:** [Example strategy implementations](../examples/strategies/) (coming soon)
+- **Step 3:** Extend CLI to support `--config` parameter (coming soon)
+- **Step 4:** Run advanced strategies live (coming soon)
+- **Examples:** Example strategy implementations (coming soon)
 
 ---
 

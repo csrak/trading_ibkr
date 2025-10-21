@@ -156,7 +156,7 @@ envelopes declared in the graph.
 ## Documentation
 
 - [Quick Start Guide](QUICKSTART.md) — installation and first trades.
-- [Model Training & Data Caching Guide](docs/model_training_guide.md) — step-by-step walkthrough for preparing data, caching option chains, and training the sample model.
+- [Model Training & Data Caching Guide](docs/guides/data/model_training_guide.md) — step-by-step walkthrough for preparing data, caching option chains, and training the sample model.
 
 ## Live Trading (Use with Extreme Caution)
 
@@ -355,8 +355,8 @@ Contributions welcome! Please:
 - Issues: open a ticket via the project's GitHub repository
 - Documentation:
   - [Quick Start Guide](QUICKSTART.md)
-  - [Model Training & Data Caching Guide](docs/model_training_guide.md)
-  - [Risk Management Guide](docs/risk_management.md)
+  - [Model Training & Data Caching Guide](docs/guides/data/model_training_guide.md)
+  - [Risk Management Guide](docs/guides/operations/risk_management.md)
   - [Market Making Simulation Plan](docs/market_making/simulation_plan.md)
 
 ---

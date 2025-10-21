@@ -6,6 +6,7 @@ import asyncio
 from contextlib import AbstractAsyncContextManager, suppress
 from datetime import UTC, datetime
 from decimal import Decimal, InvalidOperation
+from difflib import get_close_matches
 from pathlib import Path
 
 import typer
@@ -381,8 +382,17 @@ def paper_quick(
     try:
         preset_obj = get_preset(preset)
     except KeyError:
-        available = ", ".join(preset_names())
-        logger.error(f"Unknown preset '{preset}'. Available: {available}")
+        available_list = list(preset_names())
+        lower_to_name = {name.lower(): name for name in available_list}
+        suggestion_keys = get_close_matches(preset.lower(), lower_to_name.keys(), n=1)
+        suggestion = lower_to_name[suggestion_keys[0]] if suggestion_keys else None
+        suggestion_msg = f" Did you mean '{suggestion}'?" if suggestion else ""
+        available = ", ".join(available_list)
+        message = (
+            f"Unknown preset '{preset}'. Available: {available}.{suggestion_msg} "
+            "Use '--list-presets' to inspect details."
+        )
+        logger.error(message)
         raise typer.Exit(code=1) from None
 
     contract, effective_quantity = preset_obj.with_quantity(quantity)

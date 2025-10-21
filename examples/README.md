@@ -167,7 +167,7 @@ Basic market making with fixed spread and inventory management.
 
 **Use Case:** High-frequency trading, liquidity provision
 
-**Note:** Requires L2 order book data (see `docs/order_book_implementation.md`)
+**Note:** Requires L2 order book data (see `docs/architecture/order_book_implementation.md`)
 
 ## Configuration Files
 
@@ -311,7 +311,7 @@ IBKR_PORT=7497           # Paper trading port (7496 = live)
 
 ### Creating New Strategies
 
-See `docs/strategy_quick_start.md` for templates:
+See `docs/guides/strategies/strategy_quick_start.md` for templates:
 1. Choose template (price-based, market making, ML, portfolio)
 2. Copy template to `examples/strategies/`
 3. Implement your logic
@@ -378,11 +378,11 @@ See `docs/strategy_quick_start.md` for templates:
 
 ## Resources
 
-- **Monitoring Guide:** `docs/monitoring_guide.md` - Real-time dashboard and session analysis
-- **Strategy Guide:** `docs/unified_strategy_guide.md` - Complete strategy development
-- **Quick Start:** `docs/strategy_quick_start.md` - Strategy templates
-- **Order Book:** `docs/order_book_implementation.md` - L2 market depth
-- **Model Training:** `docs/model_training_guide.md` - ML model workflows
+- **Monitoring Guide:** `docs/guides/operations/monitoring_guide.md` - Real-time dashboard and session analysis
+- **Strategy Guide:** `docs/guides/strategies/unified_strategy_guide.md` - Complete strategy development
+- **Quick Start:** `docs/guides/strategies/strategy_quick_start.md` - Strategy templates
+- **Order Book:** `docs/architecture/order_book_implementation.md` - L2 market depth
+- **Model Training:** `docs/guides/data/model_training_guide.md` - ML model workflows
 - **Repository Guide:** `CLAUDE.md` - Development reference
 
 ## Support

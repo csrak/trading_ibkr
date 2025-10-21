@@ -40,7 +40,7 @@ class DOMLevel:
 
 ### Current Implementation
 
-Located in `model/data/models.py`:
+Located in `../../model/data/models.py`:
 
 ```python
 @dataclass(slots=True)
@@ -305,4 +305,4 @@ await order_book_service.subscribe(contract, "AAPL")
 
 - [ib_insync Documentation](https://ib-insync.readthedocs.io/)
 - [IBKR Market Depth API](https://interactivebrokers.github.io/tws-api/market_depth.html)
-- [Order Book Data Model](../model/data/models.py)
+- [Order Book Data Model](../../model/data/models.py)

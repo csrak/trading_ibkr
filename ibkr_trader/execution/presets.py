@@ -60,6 +60,15 @@ _PRESETS: dict[str, TradePreset] = {
         ),
         default_quantity=1,
     ),
+    "aapl": TradePreset(
+        contract=SymbolContract(
+            symbol="AAPL",
+            sec_type="STK",
+            exchange="SMART",
+            currency="USD",
+        ),
+        default_quantity=1,
+    ),
 }
 
 

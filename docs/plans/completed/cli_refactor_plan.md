@@ -1,5 +1,7 @@
 # CLI Refactoring Plan
 
+**Status:** Completed (structure deployed via `ibkr_trader/cli_commands/` modules)
+
 ## Problem
 
 `ibkr_trader/cli.py` is currently **1593 lines**, making it difficult to:

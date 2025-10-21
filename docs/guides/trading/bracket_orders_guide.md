@@ -344,7 +344,7 @@ uv run pytest tests/test_bracket_orders.py -v
 
 ## See Also
 
-- [Quick Start Guide](../QUICKSTART.md) - Getting started with the platform
-- [README](../README.md) - Full platform documentation
-- [Broker API](../ibkr_trader/execution/broker.py) - Broker implementation details
-- [Models](../ibkr_trader/models.py) - Order request models and validation
+- [Quick Start Guide](../../../QUICKSTART.md) - Getting started with the platform
+- [README](../../../README.md) - Full platform documentation
+- [Broker API](../../../ibkr_trader/execution/broker.py) - Broker implementation details
+- [Models](../../../ibkr_trader/models.py) - Order request models and validation
