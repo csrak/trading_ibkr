@@ -75,7 +75,7 @@ from datetime import UTC, datetime
 from ib_insync import IB, Contract, Ticker
 from loguru import logger
 
-from ibkr_trader.events import EventBus, EventTopic
+from ibkr_trader.core import EventBus, EventTopic
 from model.data.models import BookSide, OrderBookLevel, OrderBookSnapshot
 
 
@@ -175,7 +175,7 @@ class OrderBookService:
 
 ### Phase 2: Add EventTopic.ORDER_BOOK
 
-**File:** `ibkr_trader/events.py`
+**File:** `ibkr_trader/core/events.py`
 
 Add to EventTopic enum:
 ```python

@@ -102,8 +102,9 @@ ibkr-trader bracket-order \
 ```python
 import asyncio
 from decimal import Decimal
-from ibkr_trader.broker import IBKRBroker
-from ibkr_trader.config import load_config
+
+from ibkr_trader.core import load_config
+from ibkr_trader.execution import IBKRBroker
 from ibkr_trader.models import (
     BracketOrderRequest,
     OrderRequest,
@@ -345,5 +346,5 @@ uv run pytest tests/test_bracket_orders.py -v
 
 - [Quick Start Guide](../QUICKSTART.md) - Getting started with the platform
 - [README](../README.md) - Full platform documentation
-- [Broker API](../ibkr_trader/broker.py) - Broker implementation details
+- [Broker API](../ibkr_trader/execution/broker.py) - Broker implementation details
 - [Models](../ibkr_trader/models.py) - Order request models and validation

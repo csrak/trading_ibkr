@@ -65,8 +65,8 @@ class MyPriceStrategy(BaseStrategy):
 **Run it live:**
 ```python
 from ibkr_trader.strategy import Strategy, StrategyConfig
-from ibkr_trader.broker import IBKRBroker
-from ibkr_trader.events import EventBus
+from ibkr_trader.execution import IBKRBroker
+from ibkr_trader.core import EventBus
 
 # Wrap in live Strategy class
 class MyLiveStrategy(Strategy):
@@ -491,7 +491,7 @@ async def test_my_strategy_buys_on_signal():
 ### Integration Test with SimulatedBroker
 ```python
 from ibkr_trader.sim.broker import SimulatedBroker
-from ibkr_trader.events import EventBus
+from ibkr_trader.core import EventBus
 
 @pytest.mark.asyncio
 async def test_strategy_execution():

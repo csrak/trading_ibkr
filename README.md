@@ -20,19 +20,16 @@ A **safe, modular, and type-safe** trading platform for Interactive Brokers TWS,
 
 ## Architecture
 
-Clean, modular design following best practices:
+The codebase is organised into clear domains so you can extend it without touching unrelated pieces:
 
-- **Config**: Pydantic v2 settings with environment variable support
-- **Safety**: `LiveTradingGuard` with multi-layer protection
-- **Broker**: Async IBKR connection manager that also publishes order status events and supports advanced order types
-- **Events**: Lightweight asyncio pub/sub bus keeping market data and order updates decoupled
-- **Market Data**: Service layer for throttled subscriptions and external price feeds
-- **Portfolio**: In-memory portfolio/risk tracking with daily loss and exposure guardrails,
-  persisted to `data/portfolio_snapshot.json` by default for resilience
-- **Sim/Backtest**: Drop-in simulated broker/market data components and reusable engine for backtests (`ibkr_trader/sim`, `ibkr_trader/backtest`)
-- **Model**: Offline training pipelines (`model/training`) and artifact loaders (`model/registry`) kept separate from runtime execution
-- **Strategy**: Event-driven strategies that subscribe to bus updates and submit orders through a shared context
-- **CLI**: Typer-based command-line interface
+- **Core (`ibkr_trader/core`)** – configuration loader, event bus, telemetry, and shared constants.
+- **Risk (`ibkr_trader/risk`)** – portfolio state tracking, per-symbol limits, correlation guards.
+- **Execution (`ibkr_trader/execution`)** – IBKR broker adapter, order helpers (OCO, trailing stops), presets.
+- **Data (`ibkr_trader/data`)** – market-data services, screeners, cache helpers.
+- **Strategies (`ibkr_trader/strategies`)** – live strategy base classes and concrete implementations (e.g. adaptive momentum).
+- **Simulation & Backtest (`ibkr_trader/sim`, `ibkr_trader/backtest`)** – replay engine and simulated brokers for offline testing.
+- **CLI (`ibkr_trader/cli`)** – Typer command groups for trading, data, monitoring.
+- **Model Training (`model/training`)** – Offline pipelines and registry utilities.
 
 ## Installation
 
@@ -134,6 +131,9 @@ ibkr-trader backtest data/AAPL_1d.csv --symbol AAPL --timestamp date --price clo
 ```bash
 # Simple moving average strategy
 ibkr-trader run --symbol AAPL --symbol MSFT
+
+# Adaptive momentum prototype with screener integration
+ibkr-trader run --strategy adaptive_momentum --symbol AAPL --symbol MSFT
 
 # Custom SMA periods
 ibkr-trader run --symbol AAPL --fast 5 --slow 15

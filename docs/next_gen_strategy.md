@@ -33,8 +33,8 @@
 - `ibkr_trader/strategies/adaptive_momentum.py`: main strategy class.
 - `ibkr_trader/strategies/config.py`: Pydantic config with parameters (lookbacks, thresholds, risk caps).
 - `ibkr_trader/strategies/factors.py`: reusable factor calculators (momentum, mean reversion, volatility).
-- `ibkr_trader/screeners/base.py`: interfaces for symbol screeners.
-- `ibkr_trader/screeners/liquidity.py`: first implementation (volume/liquidity filters).
+- `ibkr_trader/data/screeners/base.py`: interfaces for symbol screeners.
+- `ibkr_trader/data/screeners/liquidity.py`: first implementation (volume/liquidity filters).
 - `ibkr_trader/screeners/momentum.py`: optional ranking by intermediate signal.
 - `ibkr_trader/strategy_configs/adaptive_momentum.json`: example config for immediate use.
 

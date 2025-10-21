@@ -240,8 +240,8 @@ class Strategy(BaseStrategy):
 
 ```python
 from ibkr_trader.strategy import Strategy, StrategyConfig
-from ibkr_trader.broker import IBKRBroker
-from ibkr_trader.events import EventBus
+from ibkr_trader.execution import IBKRBroker
+from ibkr_trader.core import EventBus
 
 class MyLiveStrategy(Strategy):
     async def on_bar(self, symbol: str, price: Decimal, broker: BrokerProtocol) -> None:
@@ -331,7 +331,7 @@ Test strategies with SimulatedBroker:
 
 ```python
 from ibkr_trader.sim.broker import SimulatedBroker
-from ibkr_trader.events import EventBus
+from ibkr_trader.core import EventBus
 
 @pytest.mark.asyncio
 async def test_strategy_with_simulated_broker():

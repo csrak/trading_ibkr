@@ -121,12 +121,11 @@ import asyncio
 from decimal import Decimal
 from pathlib import Path
 
-from ibkr_trader.broker import IBKRBroker
-from ibkr_trader.config import load_config
-from ibkr_trader.events import EventBus
+from ibkr_trader.base_strategy import BaseStrategy, BrokerProtocol
+from ibkr_trader.core import EventBus, load_config
+from ibkr_trader.execution import IBKRBroker, TrailingStopManager
 from ibkr_trader.models import OrderSide, TrailingStopConfig
 from ibkr_trader.safety import LiveTradingGuard
-from ibkr_trader.trailing_stops import TrailingStopManager
 
 async def create_trailing_stop_example():
     config = load_config()
@@ -182,10 +181,6 @@ asyncio.run(create_trailing_stop_example())
 ### Integration with Strategies
 
 ```python
-from ibkr_trader.base_strategy import BaseStrategy
-from ibkr_trader.broker_protocol import BrokerProtocol
-from ibkr_trader.models import OrderSide
-from ibkr_trader.trailing_stops import TrailingStopManager
 from decimal import Decimal
 
 class MyStrategyWithTrailing(BaseStrategy):
@@ -422,4 +417,4 @@ uv run pytest tests/test_trailing_stops.py::test_trailing_stop_long_position_rai
 - [Bracket Orders Guide](bracket_orders_guide.md) - Entry + stop loss + take profit
 - [Strategy Quick Start](strategy_quick_start.md) - Building custom strategies
 - [README](../README.md) - Full platform documentation
-- [Trailing Stop Manager](../ibkr_trader/trailing_stops.py) - Implementation details
+- [Trailing Stop Manager](../ibkr_trader/execution/trailing_stops.py) - Implementation details

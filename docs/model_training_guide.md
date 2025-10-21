@@ -49,7 +49,7 @@ Use `ibkr-trader diagnostics` (described later) to inspect TTL settings and view
 
 ## 3. Configure Training Defaults
 
-`IBKRConfig` (loaded by `ibkr_trader.config.load_config`) now includes training-specific settings:
+`IBKRConfig` (loaded by `ibkr_trader.core.config.load_config`) now includes training-specific settings:
 
 - `training_data_source`: default source for price bars (`"yfinance"` or `"ibkr"`).
 - `training_cache_dir`: base path for cached datasets.
