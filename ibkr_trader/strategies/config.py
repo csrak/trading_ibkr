@@ -16,6 +16,9 @@ class AdaptiveMomentumConfig(StrategyConfig):
     slow_lookback: int = Field(default=20, description="Slow momentum lookback (bars).")
     reversion_lookback: int = Field(default=30, description="VWAP/reversion lookback (bars).")
     atr_lookback: int = Field(default=14, description="ATR window used for volatility sizing.")
+    vwap_lookback: int = Field(
+        default=20, description="VWAP calculation period (bars). Uses reversion_lookback if 0."
+    )
     max_risk_fraction: Decimal = Field(
         default=Decimal("0.02"),
         description="Fraction of account equity to risk per position.",

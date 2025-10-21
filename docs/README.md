@@ -26,6 +26,7 @@ Complete documentation for IBKR Personal Trader.
 
 ### Data & Modeling
 - **[Model Training Guide](guides/data/model_training_guide.md)** - ML model workflows and data caching
+- **[Liquidity Screener Guide](guides/data/liquidity_screener_guide.md)** ⭐ NEW - Filter symbols by real market liquidity metrics
 - **[Order Book Implementation](architecture/order_book_implementation.md)** - L2 market depth integration
 - **[Strategy Coordinator Architecture](architecture/strategy_coordinator_architecture.md)** - Coordinator design notes
 

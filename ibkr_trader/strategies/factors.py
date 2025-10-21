@@ -43,3 +43,47 @@ def atr(
         return Decimal("0")
     ranges = [highs[-i] - lows[-i] for i in range(1, period + 1)]
     return sum(ranges) / Decimal(len(ranges))
+
+
+def vwap(
+    prices: deque[Decimal],
+    highs: deque[Decimal],
+    lows: deque[Decimal],
+    volumes: deque[int],
+    period: int,
+) -> Decimal:
+    """Calculate Volume Weighted Average Price over a period.
+
+    Uses typical price: (high + low + close) / 3
+    VWAP = Σ(typical_price × volume) / Σ(volume)
+
+    Args:
+        prices: Close prices (deque)
+        highs: High prices (deque)
+        lows: Low prices (deque)
+        volumes: Volume data (deque)
+        period: Lookback period in bars
+
+    Returns:
+        VWAP value, or Decimal("0") if insufficient data
+    """
+    if len(prices) < period or len(highs) < period or len(lows) < period or len(volumes) < period:
+        return Decimal("0")
+
+    # Calculate typical price and weighted values for last N bars
+    price_volume_sum = Decimal("0")
+    volume_sum = Decimal("0")
+
+    for i in range(1, period + 1):
+        # Typical price = (high + low + close) / 3
+        typical_price = (highs[-i] + lows[-i] + prices[-i]) / Decimal("3")
+        volume = Decimal(volumes[-i])
+
+        price_volume_sum += typical_price * volume
+        volume_sum += volume
+
+    # Avoid division by zero
+    if volume_sum == 0:
+        return Decimal("0")
+
+    return price_volume_sum / volume_sum

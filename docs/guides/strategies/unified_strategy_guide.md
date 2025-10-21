@@ -267,7 +267,7 @@ async def on_bar(
 The `ibkr_trader/strategies/factors.py` module provides OHLC-based indicators:
 
 ```python
-from ibkr_trader.strategies.factors import atr, momentum_signal
+from ibkr_trader.strategies.factors import atr, momentum_signal, vwap
 
 # ATR using high/low data
 volatility = atr(
@@ -283,7 +283,204 @@ momentum = momentum_signal(
     fast=5,
     slow=20
 )
+
+# VWAP using OHLC+Volume data (NEW in 2025-10-21)
+vwap_value = vwap(
+    prices=price_history,
+    highs=high_history,
+    lows=low_history,
+    volumes=volume_history,
+    period=20
+)
+
+# Price deviation from VWAP (mean reversion signal)
+deviation_pct = (current_price - vwap_value) / vwap_value * Decimal("100")
+if deviation_pct < -2:  # Price 2% below VWAP
+    # Potential buy signal (mean reversion)
+    pass
 ```
+
+---
+
+### Dynamic Universe Management with Screeners
+
+Strategies can automatically refresh their trading universe using screeners. The `AdaptiveMomentumStrategy` supports periodic screener refresh to adapt to changing market conditions.
+
+#### Configuration
+
+Set the refresh interval in your strategy config:
+
+```python
+from ibkr_trader.strategies.config import AdaptiveMomentumConfig
+
+config = AdaptiveMomentumConfig(
+    name="adaptive_momentum",
+    symbols=["AAPL", "MSFT"],  # Initial universe
+    screener_refresh_seconds=900,  # Refresh every 15 minutes (default)
+    # ... other config
+)
+```
+
+**Key parameters:**
+- `screener_refresh_seconds`: How often to run the screener (in seconds)
+  - Default: `900` (15 minutes)
+  - Set to `0` to disable automatic refresh
+  - Minimum recommended: `60` seconds to avoid excessive API calls
+
+#### Attaching a Screener
+
+Connect a `LiquidityScreener` (or any screener) to your strategy:
+
+```python
+from ibkr_trader.strategies.adaptive_momentum import AdaptiveMomentumStrategy
+from ibkr_trader.data import LiquidityScreener, LiquidityScreenerConfig
+from model.data.client import MarketDataClient
+from decimal import Decimal
+
+# Configure screener
+screener_config = LiquidityScreenerConfig(
+    minimum_dollar_volume=Decimal("100000000"),  # $100M daily volume
+    minimum_price=Decimal("20"),
+    max_symbols=20,
+    lookback_days=5,
+)
+
+# Create screener with market data client
+market_data_client = MarketDataClient(...)
+screener = LiquidityScreener(screener_config, market_data_client)
+
+# Attach to strategy
+strategy = AdaptiveMomentumStrategy(config, broker, event_bus)
+strategy.set_screener(screener)
+
+# Start strategy - screener refresh task starts automatically
+await strategy.start()
+```
+
+#### How It Works
+
+1. **On startup**: If a screener is attached and `screener_refresh_seconds > 0`, a background task is created
+2. **Periodic refresh**: Every N seconds, the screener runs and returns a new symbol list
+3. **Universe update**: The strategy's `_symbols` set is updated with the new symbols
+4. **Buffer management**: History buffers are preserved for existing symbols, created for new ones
+5. **Telemetry**: Each refresh emits a `{namespace}.screen_refresh` event with the new universe
+
+#### Refresh Behavior
+
+```python
+async def refresh_universe(self) -> None:
+    """Called automatically by the scheduler."""
+    if self._screener is None:
+        return
+
+    result = await self._screener.run()
+    new_symbols = {symbol.upper() for symbol in result.symbols}
+
+    if not new_symbols:
+        logger.warning("Screener returned empty universe; retaining previous symbols")
+        return  # Keeps current symbols on empty result
+
+    self._symbols = new_symbols  # Update universe
+    # Buffers updated for new symbols...
+```
+
+**Safety features:**
+- Empty screener results are rejected (preserves current universe)
+- Errors during refresh are logged but don't crash the strategy
+- Screener failures don't disrupt trading on existing symbols
+
+#### Manual Refresh
+
+You can also trigger a refresh manually:
+
+```python
+# In your strategy logic
+if some_condition:
+    await self.refresh_universe()
+```
+
+#### Lifecycle Management
+
+The screener task is automatically managed:
+
+```python
+# Starting the strategy
+await strategy.start()
+# → Calls super().start() to begin market data subscription
+# → Creates screener refresh task if configured
+
+# Stopping the strategy
+await strategy.stop()
+# → Cancels screener refresh task gracefully
+# → Calls super().stop() to clean up market data subscription
+```
+
+#### Telemetry Integration
+
+Each screener refresh emits telemetry:
+
+```json
+{
+  "event": "adaptive_momentum.screen_refresh",
+  "context": {
+    "symbols": ["AAPL", "MSFT", "GOOGL", "TSLA"],
+    "generated_at": "2025-10-21T12:00:00Z",
+    "metadata": {
+      "data_source": "real",
+      "lookback_days": 5,
+      "universe_size": 4
+    }
+  }
+}
+```
+
+On errors:
+
+```json
+{
+  "event": "adaptive_momentum.screener_error",
+  "level": "error",
+  "context": {
+    "error": "Connection timeout to market data service"
+  }
+}
+```
+
+#### Testing Screener Integration
+
+Example test using mocked screener:
+
+```python
+import pytest
+from unittest.mock import Mock, AsyncMock
+from ibkr_trader.data import ScreenerResult
+from datetime import UTC, datetime
+
+@pytest.mark.asyncio
+async def test_screener_refresh():
+    # Create mock screener
+    mock_screener = Mock()
+    mock_screener.run = AsyncMock(
+        return_value=ScreenerResult(
+            symbols=["AAPL", "GOOGL", "TSLA"],
+            generated_at=datetime.now(UTC),
+            metadata={"test": True},
+        )
+    )
+
+    strategy = AdaptiveMomentumStrategy(config, broker, event_bus)
+    strategy.set_screener(mock_screener)
+
+    await strategy.start()
+    await asyncio.sleep(1.5)  # Wait for refresh
+
+    # Verify universe updated
+    assert strategy._symbols == {"AAPL", "GOOGL", "TSLA"}
+
+    await strategy.stop()
+```
+
+See `tests/test_adaptive_momentum.py` for comprehensive screener scheduler tests.
 
 ---
 
