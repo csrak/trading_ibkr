@@ -1,6 +1,7 @@
-"""Compatibility shim for ibkr_trader.portfolio."""
+"""Risk management package."""
 
-from ibkr_trader.risk.portfolio import (
+from .guards import CorrelationMatrix, CorrelationRiskGuard
+from .portfolio import (
     PortfolioSnapshot,
     PortfolioState,
     RiskGuard,
@@ -14,4 +15,6 @@ __all__ = [
     "RiskGuard",
     "SymbolLimitRegistry",
     "SymbolLimits",
+    "CorrelationMatrix",
+    "CorrelationRiskGuard",
 ]

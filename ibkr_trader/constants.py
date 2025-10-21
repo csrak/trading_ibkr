@@ -1,15 +1,23 @@
-"""Common constants shared across the trading platform."""
+"""Compatibility shim for ibkr_trader.constants."""
 
-from __future__ import annotations
+from ibkr_trader.core.constants import (
+    DEFAULT_CORRELATION_MATRIX_FILE,
+    DEFAULT_PORTFOLIO_SNAPSHOT,
+    DEFAULT_SYMBOL_LIMITS_FILE,
+    MARKET_DATA_IDLE_SLEEP_SECONDS,
+    MOCK_PRICE_BASE,
+    MOCK_PRICE_SLEEP_SECONDS,
+    MOCK_PRICE_VARIATION_MODULO,
+    SUBSCRIPTION_SOFT_LIMIT,
+)
 
-from decimal import Decimal
-from pathlib import Path
-
-SUBSCRIPTION_SOFT_LIMIT = 50
-MOCK_PRICE_BASE = Decimal("150.0")
-MOCK_PRICE_VARIATION_MODULO = 20
-MOCK_PRICE_SLEEP_SECONDS = 5
-MARKET_DATA_IDLE_SLEEP_SECONDS = 1
-DEFAULT_PORTFOLIO_SNAPSHOT = Path("data/portfolio_snapshot.json")
-DEFAULT_SYMBOL_LIMITS_FILE = Path("data/symbol_limits.json")
-DEFAULT_CORRELATION_MATRIX_FILE = Path("data/correlation_matrix.json")
+__all__ = [
+    "SUBSCRIPTION_SOFT_LIMIT",
+    "MOCK_PRICE_BASE",
+    "MOCK_PRICE_VARIATION_MODULO",
+    "MOCK_PRICE_SLEEP_SECONDS",
+    "MARKET_DATA_IDLE_SLEEP_SECONDS",
+    "DEFAULT_PORTFOLIO_SNAPSHOT",
+    "DEFAULT_SYMBOL_LIMITS_FILE",
+    "DEFAULT_CORRELATION_MATRIX_FILE",
+]

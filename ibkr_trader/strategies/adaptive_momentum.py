@@ -9,12 +9,12 @@ from decimal import ROUND_DOWN, Decimal
 from loguru import logger
 
 from ibkr_trader.base_strategy import BrokerProtocol
+from ibkr_trader.data import Screener
 from ibkr_trader.events import EventBus
 from ibkr_trader.portfolio import RiskGuard
 from ibkr_trader.strategy import Strategy
 from ibkr_trader.telemetry import TelemetryReporter
 
-from .base import Screener
 from .config import AdaptiveMomentumConfig
 from .factors import MomentumReading, atr, momentum_signal
 
