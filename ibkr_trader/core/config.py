@@ -4,9 +4,13 @@ from __future__ import annotations
 
 from enum import Enum
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+if TYPE_CHECKING:
+    from ibkr_trader.risk.fees import FeeConfig
 
 
 class TradingMode(str, Enum):
@@ -57,6 +61,40 @@ class IBKRConfig(BaseSettings):
     correlation_threshold: float = Field(
         default=0.75,
         description="Correlation coefficient threshold for aggregating exposures",
+    )
+
+    # Fee and slippage configuration
+    enable_fee_estimates: bool = Field(
+        default=False,
+        description="Enable fee and slippage estimates in risk calculations",
+    )
+    stock_commission_per_share: float = Field(
+        default=0.005,
+        description="Stock commission per share (IBKR Tiered: $0.005)",
+    )
+    stock_commission_minimum: float = Field(
+        default=1.00,
+        description="Minimum stock commission per order",
+    )
+    stock_slippage_bps: float = Field(
+        default=5.0,
+        description="Stock slippage estimate in basis points (default: 5 bps)",
+    )
+    forex_commission_percentage: float = Field(
+        default=0.00002,
+        description="FX commission as percentage of notional (IBKR: 0.2 bps = 0.00002)",
+    )
+    forex_slippage_bps: float = Field(
+        default=1.0,
+        description="FX slippage estimate in basis points (default: 1 bp, highly liquid)",
+    )
+    option_commission_per_contract: float = Field(
+        default=0.65,
+        description="Option commission per contract (IBKR: $0.65-$1.00)",
+    )
+    option_slippage_bps: float = Field(
+        default=20.0,
+        description="Option slippage estimate in basis points (default: 20 bps)",
     )
 
     # Data paths
@@ -115,6 +153,39 @@ class IBKRConfig(BaseSettings):
         self.data_dir.mkdir(parents=True, exist_ok=True)
         self.log_dir.mkdir(parents=True, exist_ok=True)
         self.training_cache_dir.mkdir(parents=True, exist_ok=True)
+
+    def create_fee_config(self) -> FeeConfig:
+        """Create FeeConfig from settings.
+
+        Returns:
+            FeeConfig instance with commission and slippage profiles from config.
+        """
+        from decimal import Decimal
+
+        from ibkr_trader.risk.fees import CommissionProfile, FeeConfig, SlippageEstimate
+
+        return FeeConfig(
+            stock_commission=CommissionProfile(
+                per_share=Decimal(str(self.stock_commission_per_share)),
+                minimum=Decimal(str(self.stock_commission_minimum)),
+            ),
+            forex_commission=CommissionProfile(
+                percentage=Decimal(str(self.forex_commission_percentage)),
+            ),
+            option_commission=CommissionProfile(
+                per_share=Decimal(str(self.option_commission_per_contract)),
+                minimum=Decimal(str(self.stock_commission_minimum)),
+            ),
+            stock_slippage=SlippageEstimate(
+                basis_points=Decimal(str(self.stock_slippage_bps)),
+            ),
+            forex_slippage=SlippageEstimate(
+                basis_points=Decimal(str(self.forex_slippage_bps)),
+            ),
+            option_slippage=SlippageEstimate(
+                basis_points=Decimal(str(self.option_slippage_bps)),
+            ),
+        )
 
 
 def load_config() -> IBKRConfig:
