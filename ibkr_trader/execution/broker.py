@@ -231,6 +231,21 @@ class IBKRBroker:
                 or order_request.stop_price
                 or Decimal("0")
             )
+
+            # Log estimated transaction costs if fee config is available
+            if self._risk_guard.fee_config is not None and price_for_risk > 0:
+                commission, slippage = self._risk_guard.fee_config.estimate_costs(
+                    contract=order_request.contract,
+                    side=order_request.side,
+                    quantity=order_request.quantity,
+                    price=Decimal(price_for_risk),
+                )
+                total_costs = commission + slippage
+                logger.info(
+                    f"Estimated costs for {order_request.contract.symbol}: "
+                    f"commission=${commission}, slippage=${slippage}, total=${total_costs}"
+                )
+
             await self._risk_guard.validate_order(
                 contract=order_request.contract,
                 side=order_request.side,

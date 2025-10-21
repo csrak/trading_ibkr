@@ -17,6 +17,7 @@ from ibkr_trader.core.events import ExecutionEvent, OrderStatusEvent
 from ibkr_trader.models import OrderSide, OrderStatus, Position, SymbolContract
 
 if TYPE_CHECKING:
+    from ibkr_trader.risk.fees import FeeConfig
     from ibkr_trader.risk.guards import CorrelationRiskGuard
 
 
@@ -389,28 +390,46 @@ class RiskGuard:
         max_exposure: Decimal,
         symbol_limits: SymbolLimitRegistry | None = None,
         correlation_guard: CorrelationRiskGuard | None = None,
+        fee_config: FeeConfig | None = None,
     ) -> None:
         self.portfolio = portfolio
         self.max_exposure = max_exposure
         self.symbol_limits = symbol_limits
         self.correlation_guard = correlation_guard
+        self.fee_config = fee_config
 
     async def validate_order(
         self, contract: SymbolContract, side: OrderSide, quantity: int, price: Decimal
     ) -> None:
         await self.portfolio.check_daily_loss_limit()
 
+        # Calculate base exposure
+        exposure = price * quantity
+
+        # Add estimated transaction costs if fee config is provided
+        if self.fee_config is not None:
+            transaction_costs = self.fee_config.total_cost(contract, side, quantity, price)
+            fee_adjusted_exposure = exposure + transaction_costs
+            logger.debug(
+                "Fee-aware exposure for {}: base={} costs={} total={}",
+                contract.symbol,
+                exposure,
+                transaction_costs,
+                fee_adjusted_exposure,
+            )
+        else:
+            fee_adjusted_exposure = exposure
+
         symbol_limits = (
             self.symbol_limits.get_limit(contract.symbol) if self.symbol_limits else None
         )
-        exposure = price * quantity
         if symbol_limits is not None:
             await self._validate_symbol_limits(
                 contract=contract,
                 side=side,
                 quantity=quantity,
                 price=price,
-                exposure=exposure,
+                exposure=fee_adjusted_exposure,
                 limits=symbol_limits,
             )
 
@@ -431,9 +450,9 @@ class RiskGuard:
             )
             return
 
-        if exposure > self.max_exposure:
+        if fee_adjusted_exposure > self.max_exposure:
             message = (
-                f"Order exposure {exposure} exceeds max exposure "
+                f"Order exposure {fee_adjusted_exposure} (including fees) exceeds max exposure "
                 f"{self.max_exposure} for {contract.symbol}"
             )
             raise RuntimeError(message)

@@ -1,5 +1,6 @@
 """Risk management package."""
 
+from .fees import CommissionProfile, FeeConfig, SlippageEstimate
 from .guards import CorrelationMatrix, CorrelationRiskGuard
 from .portfolio import (
     PortfolioSnapshot,
@@ -17,4 +18,7 @@ __all__ = [
     "SymbolLimits",
     "CorrelationMatrix",
     "CorrelationRiskGuard",
+    "FeeConfig",
+    "CommissionProfile",
+    "SlippageEstimate",
 ]

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from decimal import Decimal
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
@@ -15,6 +16,7 @@ from ibkr_trader.broker import IBKRBroker
 from ibkr_trader.config import IBKRConfig
 from ibkr_trader.events import EventBus, EventTopic
 from ibkr_trader.models import OrderRequest, OrderSide, OrderType, SymbolContract
+from ibkr_trader.risk import FeeConfig, PortfolioState, RiskGuard
 from ibkr_trader.safety import LiveTradingGuard
 
 
@@ -302,3 +304,94 @@ async def test_execution_events_emitted_on_fill() -> None:
     assert event.side == OrderSide.BUY
     assert event.price == Decimal("120.0")
     subscription.close()
+
+
+@pytest.mark.asyncio
+async def test_broker_with_fee_aware_risk_guard(tmp_path: Path) -> None:
+    """Test that broker integrates with fee-aware RiskGuard."""
+    ib_mock = _make_ib_mock()
+    config = IBKRConfig()
+    guard = LiveTradingGuard(config=config)
+
+    # Create fee-aware risk guard
+    portfolio = PortfolioState(
+        max_daily_loss=Decimal("1000"),
+        snapshot_path=tmp_path / "portfolio.json",
+    )
+    fee_config = FeeConfig()  # Use defaults
+    risk_guard = RiskGuard(
+        portfolio=portfolio,
+        max_exposure=Decimal("10000"),
+        fee_config=fee_config,
+    )
+
+    broker = IBKRBroker(
+        config=config,
+        guard=guard,
+        ib_client=ib_mock,
+        risk_guard=risk_guard,
+    )
+
+    trade = _trade_with_id(order_id=100)
+    ib_mock.placeOrder.return_value = trade
+    await broker.connect()
+
+    # Order should pass with fee-aware validation
+    # Base exposure: 100 * 50 = 5000
+    # Commission: 100 * 0.005 = 0.50, min 1.00 -> 1.00
+    # Slippage: 5000 * 0.0005 = 2.50
+    # Total: 5003.50 (well within 10000 limit)
+    order_request = OrderRequest(
+        contract=SymbolContract(symbol="AAPL", sec_type="STK"),
+        side=OrderSide.BUY,
+        quantity=100,
+        order_type=OrderType.MARKET,
+        expected_price=Decimal("50"),
+    )
+
+    result = await broker.place_order(order_request)
+    assert result.order_id == 100
+
+
+@pytest.mark.asyncio
+async def test_broker_fee_aware_exceeds_limit(tmp_path: Path) -> None:
+    """Test that broker rejects orders when fee-adjusted exposure exceeds limit."""
+    ib_mock = _make_ib_mock()
+    config = IBKRConfig()
+    guard = LiveTradingGuard(config=config)
+
+    # Create fee-aware risk guard with tight limit
+    portfolio = PortfolioState(
+        max_daily_loss=Decimal("1000"),
+        snapshot_path=tmp_path / "portfolio.json",
+    )
+    fee_config = FeeConfig()
+    risk_guard = RiskGuard(
+        portfolio=portfolio,
+        max_exposure=Decimal("5000"),  # Tight limit
+        fee_config=fee_config,
+    )
+
+    broker = IBKRBroker(
+        config=config,
+        guard=guard,
+        ib_client=ib_mock,
+        risk_guard=risk_guard,
+    )
+
+    await broker.connect()
+
+    # Order should be rejected due to fees pushing over limit
+    # Base exposure: 100 * 50 = 5000
+    # Fees: ~3.50
+    # Total: ~5003.50 (exceeds 5000 limit)
+    order_request = OrderRequest(
+        contract=SymbolContract(symbol="AAPL", sec_type="STK"),
+        side=OrderSide.BUY,
+        quantity=100,
+        order_type=OrderType.MARKET,
+        expected_price=Decimal("50"),
+    )
+
+    with pytest.raises(RuntimeError, match="Order exposure.*exceeds max exposure"):
+        await broker.place_order(order_request)
