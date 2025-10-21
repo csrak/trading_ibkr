@@ -48,12 +48,15 @@ class ConfigBasedLiveStrategy(Strategy):
         self.impl = impl
         self._symbol = symbol
 
-    async def on_bar(self, symbol: str, price: Decimal, broker: BrokerProtocol) -> None:
+    async def on_bar(
+        self, symbol: str, price: Decimal, broker: BrokerProtocol, **kwargs: object
+    ) -> None:
         """Forward price bar updates to the underlying strategy.
 
         Args:
             symbol: Trading symbol
             price: Current price
             broker: Broker instance
+            **kwargs: Optional OHLC data (high, low, volume)
         """
-        await self.impl.on_bar(symbol, price, broker)
+        await self.impl.on_bar(symbol, price, broker, **kwargs)

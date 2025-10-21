@@ -52,7 +52,7 @@ class BaseStrategy(ABC):  # noqa: B024
 
     # Price bar callbacks (most common)
     async def on_bar(  # noqa: B027
-        self, symbol: str, price: Decimal, broker: BrokerProtocol
+        self, symbol: str, price: Decimal, broker: BrokerProtocol, **kwargs: object
     ) -> None:
         """Process a new price bar / tick update.
 
@@ -61,12 +61,22 @@ class BaseStrategy(ABC):  # noqa: B024
 
         Args:
             symbol: Trading symbol
-            price: Current price
+            price: Current price (close price for bar data)
             broker: Broker instance for order submission and position queries
+            **kwargs: Optional OHLC data (high, low, volume) from MarketDataEvent
+
+        Kwargs:
+            high (Decimal): Bar high price (defaults to price if not provided)
+            low (Decimal): Bar low price (defaults to price if not provided)
+            volume (int): Bar volume (optional)
 
         Example:
-            async def on_bar(self, symbol: str, price: Decimal, broker: BrokerProtocol) -> None:
+            async def on_bar(
+                self, symbol: str, price: Decimal, broker: BrokerProtocol, **kwargs
+            ) -> None:
                 position = await self.get_position(symbol, broker)
+                high = kwargs.get("high", price)  # Get high or use price as default
+                low = kwargs.get("low", price)    # Get low or use price as default
                 if self.should_buy(price) and position <= 0:
                     await broker.place_order(...)
         """

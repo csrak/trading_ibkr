@@ -51,12 +51,23 @@ class AdaptiveMomentumStrategy(Strategy):
             symbol: deque(maxlen=maxlen) for symbol in self.config.symbols
         }
 
-    async def on_bar(self, symbol: str, price: Decimal, broker: BrokerProtocol) -> None:
+    async def on_bar(
+        self, symbol: str, price: Decimal, broker: BrokerProtocol, **kwargs: object
+    ) -> None:
+        """Process new price bar data.
+
+        Accepts optional high/low from MarketDataEvent for ATR calculations.
+        Falls back to using price when OHLC data is not available.
+        """
         history = self._price_history[symbol]
         history.append(price)
-        # Placeholder highs/lows; will be replaced with OHLC feed integration.
-        self._high_history[symbol].append(price)
-        self._low_history[symbol].append(price)
+
+        # Extract OHLC data from kwargs (passed from MarketDataEvent)
+        high = kwargs.get("high", price)  # Default to price if not provided
+        low = kwargs.get("low", price)  # Default to price if not provided
+
+        self._high_history[symbol].append(high)
+        self._low_history[symbol].append(low)
 
         momentum = momentum_signal(history, self.config.fast_lookback, self.config.slow_lookback)
         volatility = atr(

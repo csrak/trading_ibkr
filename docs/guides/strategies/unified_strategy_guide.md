@@ -122,6 +122,171 @@ class SimpleMovingAverageStrategy(BaseStrategy):
 
 ---
 
+### 1b. Using OHLC Data in Strategies
+
+**New in 2025-10-21**: The `on_bar()` callback now supports optional OHLC (Open-High-Low-Close) data for advanced technical indicators.
+
+#### Overview
+
+While the `price` parameter represents the close price, you can access high/low/volume data via `**kwargs` for calculations like:
+- ATR (Average True Range) - requires high/low
+- VWAP (Volume Weighted Average Price) - requires volume
+- Bollinger Bands - benefits from high/low
+- Candlestick patterns - requires OHLC
+
+#### Basic Usage
+
+```python
+from ibkr_trader.base_strategy import BaseStrategy, BrokerProtocol
+from decimal import Decimal
+
+class VolatilityStrategy(BaseStrategy):
+    def __init__(self):
+        self.highs = []
+        self.lows = []
+        self.closes = []
+
+    async def on_bar(
+        self, symbol: str, price: Decimal, broker: BrokerProtocol, **kwargs: object
+    ) -> None:
+        # Extract OHLC data from kwargs
+        high = kwargs.get("high", price)  # Falls back to price if not available
+        low = kwargs.get("low", price)    # Falls back to price if not available
+        volume = kwargs.get("volume")     # May be None
+
+        # Store for calculations
+        self.highs.append(high)
+        self.lows.append(low)
+        self.closes.append(price)
+
+        # Calculate ATR (simplified)
+        if len(self.highs) >= 14:
+            recent_ranges = [
+                self.highs[i] - self.lows[i]
+                for i in range(-14, 0)
+            ]
+            atr = sum(recent_ranges) / Decimal("14")
+
+            # Use ATR for position sizing
+            if self.should_buy(price):
+                quantity = self.calculate_position_size(atr)
+                await broker.place_order(...)
+```
+
+#### MarketDataEvent OHLC Fields
+
+The `MarketDataEvent` now includes:
+
+```python
+@dataclass(frozen=True, slots=True)
+class MarketDataEvent:
+    symbol: str
+    price: Decimal           # Close price (required)
+    timestamp: datetime      # Bar timestamp (required)
+    high: Decimal | None     # Bar high (optional, defaults to price)
+    low: Decimal | None      # Bar low (optional, defaults to price)
+    volume: int | None       # Bar volume (optional, may be None)
+```
+
+#### Backward Compatibility
+
+**All existing strategies continue to work without modification:**
+
+```python
+# Old signature still works
+async def on_bar(self, symbol: str, price: Decimal, broker: BrokerProtocol) -> None:
+    # This strategy works fine, just won't receive OHLC data
+    pass
+
+# New signature with OHLC support
+async def on_bar(
+    self, symbol: str, price: Decimal, broker: BrokerProtocol, **kwargs: object
+) -> None:
+    # This strategy can access OHLC when available
+    high = kwargs.get("high", price)
+    low = kwargs.get("low", price)
+```
+
+#### Real-World Example: Adaptive Momentum Strategy
+
+The `AdaptiveMomentumStrategy` uses real OHLC data for ATR calculation:
+
+```python
+async def on_bar(
+    self, symbol: str, price: Decimal, broker: BrokerProtocol, **kwargs: object
+) -> None:
+    # Extract OHLC data
+    high = kwargs.get("high", price)
+    low = kwargs.get("low", price)
+
+    # Store in history buffers
+    self._price_history[symbol].append(price)
+    self._high_history[symbol].append(high)
+    self._low_history[symbol].append(low)
+
+    # Calculate volatility using real high/low data
+    volatility = atr(
+        prices=self._price_history[symbol],
+        highs=self._high_history[symbol],
+        lows=self._low_history[symbol],
+        period=self.config.atr_lookback,
+    )
+
+    # Use volatility for position sizing
+    target_qty = await self._compute_target_quantity(symbol, momentum, volatility)
+```
+
+#### Type Safety
+
+All kwargs are typed as `object` for mypy compatibility. Cast to `Decimal` when extracting:
+
+```python
+async def on_bar(
+    self, symbol: str, price: Decimal, broker: BrokerProtocol, **kwargs: object
+) -> None:
+    high_raw = kwargs.get("high")
+    if high_raw is not None:
+        assert isinstance(high_raw, Decimal)
+        high = high_raw
+    else:
+        high = price  # Fallback
+```
+
+#### When OHLC Data is Available
+
+| Context | OHLC Available? | Notes |
+|---------|----------------|-------|
+| Live trading (real-time) | Partial | Currently only price; OHLC coming with bar data subscription |
+| Live trading (1-min bars) | Yes | When using bar-based market data |
+| Backtesting | Yes | When CSV includes OHLC columns |
+| Market replay | Yes | Historical bar data includes OHLC |
+| Mock data | Configurable | Mock generator can emit OHLC |
+
+#### Helper Functions
+
+The `ibkr_trader/strategies/factors.py` module provides OHLC-based indicators:
+
+```python
+from ibkr_trader.strategies.factors import atr, momentum_signal
+
+# ATR using high/low data
+volatility = atr(
+    prices=price_history,
+    highs=high_history,
+    lows=low_history,
+    period=14
+)
+
+# Momentum using close prices
+momentum = momentum_signal(
+    prices=price_history,
+    fast=5,
+    slow=20
+)
+```
+
+---
+
 ### 2. Advanced Microstructure Strategies
 
 For strategies that need L2 order book depth:

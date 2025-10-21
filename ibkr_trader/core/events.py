@@ -40,11 +40,18 @@ class OrderStatusEvent:
 
 @dataclass(frozen=True, slots=True)
 class MarketDataEvent:
-    """Payload representing a market data update for a symbol."""
+    """Payload representing a market data update for a symbol.
+
+    Can represent either a tick (price only) or a bar (OHLC).
+    When high/low are not provided, they default to price for backward compatibility.
+    """
 
     symbol: str
     price: Decimal
     timestamp: datetime
+    high: Decimal | None = None  # Bar high, defaults to price if None
+    low: Decimal | None = None  # Bar low, defaults to price if None
+    volume: int | None = None  # Bar volume, optional
 
 
 @dataclass(frozen=True, slots=True)

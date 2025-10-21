@@ -67,13 +67,16 @@ class Strategy(BaseStrategy):
         self._strategy_id: str | None = None
 
     @abstractmethod
-    async def on_bar(self, symbol: str, price: Decimal, broker: BrokerProtocol) -> None:
+    async def on_bar(
+        self, symbol: str, price: Decimal, broker: BrokerProtocol, **kwargs: object
+    ) -> None:
         """Process new price bar.
 
         Args:
             symbol: Trading symbol
             price: Current price
             broker: Broker instance for order submission
+            **kwargs: Optional OHLC data (high, low, volume)
         """
         pass
 
@@ -113,7 +116,21 @@ class Strategy(BaseStrategy):
                     event.price if isinstance(event.price, Decimal) else Decimal(str(event.price))
                 )
                 self._last_prices[symbol] = price
-                await self.on_bar(symbol, price, self.broker)
+
+                # Pass OHLC data from event to on_bar via kwargs
+                kwargs = {}
+                if event.high is not None:
+                    kwargs["high"] = (
+                        event.high if isinstance(event.high, Decimal) else Decimal(str(event.high))
+                    )
+                if event.low is not None:
+                    kwargs["low"] = (
+                        event.low if isinstance(event.low, Decimal) else Decimal(str(event.low))
+                    )
+                if event.volume is not None:
+                    kwargs["volume"] = event.volume
+
+                await self.on_bar(symbol, price, self.broker, **kwargs)
         except asyncio.CancelledError:
             raise
 
@@ -272,13 +289,16 @@ class SimpleMovingAverageStrategy(Strategy):
         recent_prices = list(prices)[-period:]
         return sum(recent_prices) / Decimal(str(period))
 
-    async def on_bar(self, symbol: str, price: Decimal, broker: BrokerProtocol) -> None:
+    async def on_bar(
+        self, symbol: str, price: Decimal, broker: BrokerProtocol, **kwargs: object
+    ) -> None:
         """Process new price bar and generate signals.
 
         Args:
             symbol: Trading symbol
             price: Current price
             broker: Broker instance for order submission
+            **kwargs: Optional OHLC data (high, low, volume) - not used by SMA strategy
         """
         # Update price history
         if symbol not in self.price_history:
@@ -367,13 +387,16 @@ class IndustryModelStrategy(Strategy):
         prediction_series = self._artifact.load_predictions(artifact_path)
         self._prediction_map = {str(idx): value for idx, value in prediction_series.items()}
 
-    async def on_bar(self, symbol: str, price: Decimal, broker: BrokerProtocol) -> None:
+    async def on_bar(
+        self, symbol: str, price: Decimal, broker: BrokerProtocol, **kwargs: object
+    ) -> None:
         """Process new price bar using ML model predictions.
 
         Args:
             symbol: Trading symbol
             price: Current price
             broker: Broker instance for order submission
+            **kwargs: Optional OHLC data (high, low, volume) - not used by industry model
         """
         event = self.last_event()
         if event is None or event.timestamp is None:
