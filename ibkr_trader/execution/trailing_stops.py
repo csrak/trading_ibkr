@@ -24,6 +24,7 @@ from ibkr_trader.models import (
     SymbolContract,
     TrailingStopConfig,
 )
+from ibkr_trader.telemetry import TelemetryReporter
 
 
 class TrailingStop:
@@ -106,17 +107,34 @@ class TrailingStopManager:
     as prices move favorably. Implements rate limiting to avoid IBKR throttling.
     """
 
-    def __init__(self, broker: IBKRBroker, event_bus: EventBus, state_file: Path) -> None:
+    def __init__(
+        self,
+        broker: IBKRBroker,
+        event_bus: EventBus,
+        state_file: Path,
+        *,
+        telemetry: TelemetryReporter | None = None,
+        min_update_interval: float = 1.0,
+    ) -> None:
         self.broker = broker
         self.event_bus = event_bus
         self.state_file = state_file
         self.active_stops: dict[str, TrailingStop] = {}
         self._subscription: EventSubscription | None = None
         self._rate_limiters: dict[str, datetime] = {}  # symbol -> last_update_time
-        self._min_update_interval = 1.0  # seconds
+        self._min_update_interval = max(min_update_interval, 0.1)
+        self._telemetry = telemetry
 
         # Load persisted state
         self._load_state()
+        if self._telemetry is not None and self.active_stops:
+            self._telemetry.info(
+                "trailing_stop.manager.restored",
+                context={
+                    "stop_count": len(self.active_stops),
+                    "symbols": sorted({stop.config.symbol for stop in self.active_stops.values()}),
+                },
+            )
 
     async def start(self) -> None:
         """Start listening to market data events."""
@@ -208,6 +226,23 @@ class TrailingStopManager:
             config.symbol,
             stop_price,
         )
+        if self._telemetry is not None:
+            mode = "trail_amount" if config.trail_amount is not None else "trail_percent"
+            self._telemetry.info(
+                "trailing_stop.created",
+                context={
+                    "stop_id": stop_id,
+                    "symbol": config.symbol,
+                    "side": config.side.value,
+                    "trail_mode": mode,
+                    "trail_value": str(config.trail_amount or config.trail_percent),
+                    "activation_price": str(config.activation_price)
+                    if config.activation_price
+                    else None,
+                    "initial_price": str(initial_price),
+                    "stop_price": str(stop_price),
+                },
+            )
 
         return stop_id
 
@@ -228,10 +263,19 @@ class TrailingStopManager:
         logger.info("Cancelling trailing stop: {}", stop_id)
 
         # Remove from active stops
-        del self.active_stops[stop_id]
+        trailing_stop = self.active_stops.pop(stop_id)
         self._save_state()
 
         logger.info("Cancelled trailing stop: {}", stop_id)
+        if self._telemetry is not None:
+            self._telemetry.info(
+                "trailing_stop.cancelled",
+                context={
+                    "stop_id": stop_id,
+                    "symbol": trailing_stop.config.symbol,
+                    "side": trailing_stop.config.side.value,
+                },
+            )
 
     async def _on_market_data(self, symbol: str, price: Decimal) -> None:
         """Handle market data update.
@@ -255,6 +299,16 @@ class TrailingStopManager:
                             stop_id,
                             price,
                         )
+                        if self._telemetry is not None:
+                            self._telemetry.info(
+                                "trailing_stop.activated",
+                                context={
+                                    "stop_id": stop_id,
+                                    "symbol": symbol,
+                                    "activation_price": str(trailing_stop.config.activation_price),
+                                    "trigger_price": str(price),
+                                },
+                            )
                 else:  # Short position
                     if price <= trailing_stop.config.activation_price:
                         trailing_stop.activated = True
@@ -263,6 +317,16 @@ class TrailingStopManager:
                             stop_id,
                             price,
                         )
+                        if self._telemetry is not None:
+                            self._telemetry.info(
+                                "trailing_stop.activated",
+                                context={
+                                    "stop_id": stop_id,
+                                    "symbol": symbol,
+                                    "activation_price": str(trailing_stop.config.activation_price),
+                                    "trigger_price": str(price),
+                                },
+                            )
 
             if not trailing_stop.activated:
                 continue
@@ -327,6 +391,7 @@ class TrailingStopManager:
             new_stop_price: New stop price
         """
         symbol = trailing_stop.config.symbol
+        previous_price = trailing_stop.current_stop_price
 
         # Check rate limit
         now = datetime.now(UTC)
@@ -339,6 +404,16 @@ class TrailingStopManager:
                     symbol,
                     time_since_update,
                 )
+                if self._telemetry is not None:
+                    self._telemetry.warning(
+                        "trailing_stop.rate_limited",
+                        context={
+                            "stop_id": trailing_stop.stop_id,
+                            "symbol": symbol,
+                            "last_update_seconds": time_since_update,
+                            "min_interval": self._min_update_interval,
+                        },
+                    )
                 return
 
         # Note: broker doesn't have modify_order yet, this would be the interface:
@@ -355,13 +430,31 @@ class TrailingStopManager:
             logger.info(
                 "Trailing stop {} updated: {} -> {}",
                 trailing_stop.stop_id,
-                trailing_stop.current_stop_price,
+                previous_price,
                 new_stop_price,
+            )
+        if self._telemetry is not None:
+            self._telemetry.info(
+                "trailing_stop.updated",
+                context={
+                    "stop_id": trailing_stop.stop_id,
+                    "symbol": symbol,
+                    "previous_price": str(previous_price),
+                    "new_price": str(new_stop_price),
+                    "last_update": trailing_stop.last_update_time.isoformat(),
+                },
             )
 
     def _save_state(self) -> None:
         """Persist active trailing stops to disk."""
-        state_data = {"stops": [stop.to_dict() for stop in self.active_stops.values()]}
+        state_data = {
+            "stops": [stop.to_dict() for stop in self.active_stops.values()],
+            "rate_limiters": {
+                symbol: timestamp.isoformat() for symbol, timestamp in self._rate_limiters.items()
+            },
+            "min_update_interval": self._min_update_interval,
+            "version": 2,
+        }
 
         self.state_file.parent.mkdir(parents=True, exist_ok=True)
         self.state_file.write_text(json.dumps(state_data, indent=2))
@@ -375,10 +468,21 @@ class TrailingStopManager:
             return
 
         try:
-            state_data = json.loads(self.state_file.read_text())
+            state_raw = self.state_file.read_text()
+            state_data = json.loads(state_raw)
             for stop_dict in state_data.get("stops", []):
                 trailing_stop = TrailingStop.from_dict(stop_dict)
                 self.active_stops[trailing_stop.stop_id] = trailing_stop
+                self._rate_limiters[trailing_stop.config.symbol] = trailing_stop.last_update_time
+
+            rate_limit_data = state_data.get("rate_limiters") or {}
+            for symbol, timestamp in rate_limit_data.items():
+                with suppress(ValueError):
+                    self._rate_limiters[symbol] = datetime.fromisoformat(timestamp)
+
+            persisted_interval = state_data.get("min_update_interval")
+            if isinstance(persisted_interval, (int, float)) and persisted_interval > 0:
+                self._min_update_interval = float(persisted_interval)
 
             logger.info("Loaded {} trailing stops from state file", len(self.active_stops))
         except Exception as e:

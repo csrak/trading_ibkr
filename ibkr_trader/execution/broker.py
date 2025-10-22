@@ -23,7 +23,13 @@ from ib_insync import (
 from loguru import logger
 
 from ibkr_trader.config import IBKRConfig
-from ibkr_trader.events import EventBus, EventTopic, ExecutionEvent, OrderStatusEvent
+from ibkr_trader.events import (
+    DiagnosticEvent,
+    EventBus,
+    EventTopic,
+    ExecutionEvent,
+    OrderStatusEvent,
+)
 from ibkr_trader.models import (
     BracketOrderRequest,
     OrderRequest,
@@ -108,6 +114,56 @@ class IBKRBroker:
             self.ib.disconnect()
             self._connected = False
             logger.info("Disconnected from IBKR")
+
+    async def cancel_all_orders(self) -> None:
+        """Cancel all open orders for the current connection."""
+        if not self.is_connected:
+            logger.warning("Cannot cancel orders - broker is not connected")
+            return
+
+        try:
+            open_trades = list(self.ib.trades())
+        except Exception as exc:  # pragma: no cover - network failure
+            logger.error("Failed to fetch open trades for cancellation: {}", exc)
+            return
+
+        if not open_trades:
+            logger.info("No open trades to cancel")
+            return
+
+        logger.warning("Cancelling {} open trades due to kill switch", len(open_trades))
+        for trade in open_trades:
+            try:
+                self.ib.cancelOrder(trade.order)
+            except Exception as exc:  # pragma: no cover - network failure
+                logger.error("Failed to cancel order {}: {}", trade.order.orderId, exc)
+
+        await asyncio.sleep(0)
+        try:
+            remaining = [trade for trade in self.ib.trades() if trade.isActive()]
+        except Exception as exc:  # pragma: no cover - network failure
+            logger.error("Failed to verify order cancellations: {}", exc)
+            return
+
+        if remaining:
+            logger.error(
+                "Kill switch: {} orders remain active after cancellation attempt.",
+                len(remaining),
+            )
+            if self._event_bus is not None:
+                await self._event_bus.publish(
+                    EventTopic.DIAGNOSTIC,
+                    DiagnosticEvent(
+                        level="ERROR",
+                        message="kill_switch.cancel_failed",
+                        timestamp=datetime.now(tz=UTC),
+                        context={
+                            "remaining_order_ids": [trade.order.orderId for trade in remaining],
+                        },
+                    ),
+                )
+        else:
+            logger.info("Kill switch cancellation completed with no remaining orders.")
 
     def _ensure_connected(self) -> None:
         """Verify that the IB client is connected before making requests."""

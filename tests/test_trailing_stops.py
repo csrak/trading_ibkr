@@ -16,7 +16,18 @@ from ibkr_trader.models import (
     SymbolContract,
     TrailingStopConfig,
 )
+from ibkr_trader.telemetry import TelemetryReporter
 from ibkr_trader.trailing_stops import TrailingStop, TrailingStopManager
+
+
+class CollectingTelemetrySink:
+    """Telemetry sink that collects emitted events for assertions."""
+
+    def __init__(self) -> None:
+        self.events: list[object] = []
+
+    def emit(self, event: object) -> None:
+        self.events.append(event)
 
 
 def test_trailing_stop_config_requires_trail_amount_or_percent() -> None:
@@ -544,6 +555,60 @@ async def test_trailing_stop_state_persistence() -> None:
 
 
 @pytest.mark.asyncio
+async def test_trailing_stop_emits_telemetry_events(tmp_path: Path) -> None:
+    """TrailingStopManager emits telemetry for create/update/rate-limit events."""
+    sink = CollectingTelemetrySink()
+    telemetry = TelemetryReporter(sink)
+
+    broker_mock = MagicMock(spec=IBKRBroker)
+    broker_mock.place_order = AsyncMock(
+        return_value=OrderResult(
+            order_id=3001,
+            contract=SymbolContract(symbol="AAPL"),
+            side=OrderSide.SELL,
+            quantity=10,
+            order_type="STP",
+            status=OrderStatus.SUBMITTED,
+        )
+    )
+
+    event_bus = EventBus()
+    state_file = tmp_path / "telemetry_trailing_stops.json"
+    manager = TrailingStopManager(
+        broker_mock,
+        event_bus,
+        state_file,
+        telemetry=telemetry,
+    )
+
+    config = TrailingStopConfig(
+        symbol="AAPL",
+        side=OrderSide.SELL,
+        quantity=10,
+        trail_amount=Decimal("5.00"),
+    )
+
+    initial_price = Decimal("150.00")
+    stop_id = await manager.create_trailing_stop(config, initial_price)
+
+    assert any(event.message == "trailing_stop.created" for event in sink.events)
+
+    # Trigger a trailing update
+    await manager._on_market_data("AAPL", Decimal("155.00"))
+    assert any(event.message == "trailing_stop.updated" for event in sink.events)
+
+    # Immediate second update should be rate-limited
+    await manager._on_market_data("AAPL", Decimal("160.00"))
+    assert any(event.message == "trailing_stop.rate_limited" for event in sink.events)
+
+    # Cancelling should emit telemetry
+    await manager.cancel_trailing_stop(stop_id)
+    assert any(event.message == "trailing_stop.cancelled" for event in sink.events)
+
+    await manager.stop()
+
+
+@pytest.mark.asyncio
 async def test_trailing_stop_cancel() -> None:
     """Test cancelling a trailing stop."""
     broker_mock = MagicMock(spec=IBKRBroker)
@@ -602,6 +667,57 @@ async def test_trailing_stop_cancel_nonexistent_raises() -> None:
     # Cleanup
     if state_file.exists():
         state_file.unlink()
+
+
+@pytest.mark.asyncio
+async def test_trailing_stop_rate_limit_persists_across_restart(tmp_path: Path) -> None:
+    """Rate limiter state survives manager restart."""
+    broker_mock = MagicMock(spec=IBKRBroker)
+    broker_mock.place_order = AsyncMock(
+        return_value=OrderResult(
+            order_id=3010,
+            contract=SymbolContract(symbol="AAPL"),
+            side=OrderSide.SELL,
+            quantity=10,
+            order_type="STP",
+            status=OrderStatus.SUBMITTED,
+        )
+    )
+
+    event_bus = EventBus()
+    state_file = tmp_path / "trailing_rate_state.json"
+
+    manager = TrailingStopManager(broker_mock, event_bus, state_file)
+
+    config = TrailingStopConfig(
+        symbol="AAPL",
+        side=OrderSide.SELL,
+        quantity=10,
+        trail_amount=Decimal("5.00"),
+    )
+
+    initial_price = Decimal("150.00")
+    stop_id = await manager.create_trailing_stop(config, initial_price)
+
+    await manager._on_market_data("AAPL", Decimal("155.00"))
+    trailing_stop = manager.active_stops[stop_id]
+    first_update_price = trailing_stop.current_stop_price
+
+    # Persist state and recreate manager
+    await manager.stop()
+    manager = TrailingStopManager(broker_mock, event_bus, state_file)
+    trailing_stop = manager.active_stops[stop_id]
+
+    # Immediate update should be skipped due to persisted rate limiter
+    await manager._on_market_data("AAPL", Decimal("160.00"))
+    assert trailing_stop.current_stop_price == first_update_price
+
+    # After sleeping beyond interval, update should proceed
+    await asyncio.sleep(1.1)
+    await manager._on_market_data("AAPL", Decimal("165.00"))
+    assert trailing_stop.current_stop_price == Decimal("160.00")
+
+    await manager.stop()
 
 
 @pytest.mark.asyncio

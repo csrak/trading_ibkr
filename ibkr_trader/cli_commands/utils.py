@@ -3,6 +3,8 @@
 import json
 import sys
 from collections import deque
+from collections.abc import Callable
+from datetime import timedelta
 from decimal import Decimal
 from pathlib import Path
 
@@ -14,6 +16,16 @@ from ibkr_trader.constants import (
     DEFAULT_PORTFOLIO_SNAPSHOT,
     DEFAULT_SYMBOL_LIMITS_FILE,
 )
+from ibkr_trader.core.alerting import (
+    AlertMessage,
+    AlertTransport,
+    LogAlertTransport,
+    TelemetryAlertConfig,
+    TelemetryAlertRouter,
+    WebhookAlertTransport,
+)
+from ibkr_trader.core.events import EventBus
+from ibkr_trader.core.kill_switch import KillSwitch
 from ibkr_trader.portfolio import PortfolioState, RiskGuard, SymbolLimitRegistry
 from ibkr_trader.risk import CorrelationMatrix, CorrelationRiskGuard
 from ibkr_trader.summary import summarize_run
@@ -99,17 +111,85 @@ def build_portfolio_and_risk_guard(
                     exc,
                 )
 
+    fee_config = (
+        config.create_fee_config() if getattr(config, "enable_fee_estimates", False) else None
+    )
+
     portfolio = PortfolioState(
         Decimal(str(config.max_daily_loss)),
         snapshot_path=snapshot_path,
+        fee_config=fee_config,
     )
     risk_guard = RiskGuard(
         portfolio=portfolio,
         max_exposure=Decimal(str(config.max_order_exposure)),
         symbol_limits=symbol_limits,
         correlation_guard=correlation_guard,
+        fee_config=fee_config,
     )
     return portfolio, risk_guard, symbol_limits
+
+
+def build_alert_transport(config: "IBKRConfig") -> AlertTransport:  # noqa: F821
+    """Construct an alert transport for central routing."""
+
+    if getattr(config, "alerting_webhook", None):
+        return WebhookAlertTransport(
+            config.alerting_webhook,  # type: ignore[arg-type]
+            verify_ssl=bool(getattr(config, "alerting_verify_ssl", True)),
+        )
+    return LogAlertTransport()
+
+
+def load_kill_switch(config: "IBKRConfig") -> KillSwitch:  # noqa: F821
+    """Load persistent kill switch state for configuration."""
+
+    state_path = config.data_dir / "kill_switch.json"
+    cancel_flag = bool(getattr(config, "kill_switch_cancel_orders", True))
+    return KillSwitch(state_path, cancel_orders_enabled=cancel_flag)
+
+
+def build_telemetry_alert_router(
+    config: "IBKRConfig",  # noqa: F821
+    event_bus: EventBus,
+    *,
+    kill_switch: KillSwitch | None = None,
+    on_kill: Callable[["AlertMessage"], None] | None = None,
+    enable_kill_switch: bool = True,
+    extra_context: dict[str, object] | None = None,
+    history_path: Path | None = None,
+    session_context: dict[str, object] | None = None,
+) -> TelemetryAlertRouter:
+    """Create a telemetry alert router wired to the CLI event bus."""
+
+    transport = build_alert_transport(config)
+    alert_config = TelemetryAlertConfig(
+        trailing_rate_limit_threshold=max(1, int(config.trailing_stop_alert_threshold)),
+        trailing_rate_limit_window=timedelta(
+            seconds=max(1, int(config.trailing_stop_alert_window_seconds))
+        ),
+        trailing_rate_limit_cooldown=timedelta(
+            seconds=max(1, int(config.trailing_stop_alert_cooldown_seconds))
+        ),
+        screener_stale_after=timedelta(seconds=max(0, int(config.screener_alert_stale_seconds))),
+        screener_check_interval=timedelta(seconds=max(1, int(config.screener_alert_check_seconds))),
+    )
+    ks = load_kill_switch(config) if enable_kill_switch else None
+    if enable_kill_switch and kill_switch is not None:
+        ks = kill_switch
+    history = history_path or (config.log_dir / "alerts_history.jsonl")
+    merged_context = dict(extra_context or {})
+    if session_context:
+        merged_context.update(session_context)
+    return TelemetryAlertRouter(
+        event_bus=event_bus,
+        transport=transport,
+        config=alert_config,
+        kill_switch=ks,
+        on_kill=on_kill,
+        extra_context=merged_context,
+        history_path=history,
+    )
 
 
 def create_market_data_client(

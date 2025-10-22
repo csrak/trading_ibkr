@@ -8,9 +8,10 @@ from pathlib import Path
 
 import pytest
 
-from ibkr_trader.events import OrderStatusEvent
+from ibkr_trader.events import ExecutionEvent, OrderStatusEvent
 from ibkr_trader.models import OrderSide, OrderStatus, Position, SymbolContract
 from ibkr_trader.portfolio import PortfolioState, RiskGuard
+from ibkr_trader.risk import FeeConfig
 
 
 @pytest.mark.asyncio
@@ -95,3 +96,30 @@ async def test_portfolio_persist_writes_snapshot(tmp_path: Path) -> None:
         snapshot_path=snapshot_path,
     )
     assert restored.snapshot.net_liquidation == Decimal("50000")
+
+
+@pytest.mark.asyncio
+async def test_portfolio_tracks_estimated_costs(tmp_path: Path) -> None:
+    fee_config = FeeConfig()
+    state = PortfolioState(
+        max_daily_loss=Decimal("1000"),
+        snapshot_path=tmp_path / "portfolio.json",
+        fee_config=fee_config,
+    )
+
+    event = ExecutionEvent(
+        order_id=1,
+        contract=SymbolContract(symbol="AAPL"),
+        side=OrderSide.SELL,
+        quantity=100,
+        price=Decimal("50"),
+        commission=Decimal("0"),
+        timestamp=datetime.now(tz=UTC),
+    )
+
+    await state.record_execution_event(event)
+
+    assert state.snapshot.realized_costs_today == Decimal("3.5")
+    assert Decimal(await state.estimated_costs_daily()) == Decimal("3.5")
+    net_daily = Decimal(await state.realized_pnl_net_daily())
+    assert net_daily == state.snapshot.realized_pnl_today - state.snapshot.realized_costs_today

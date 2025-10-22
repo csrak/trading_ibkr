@@ -71,14 +71,25 @@ class FileTelemetrySink:
 class TelemetryReporter:
     """Emit telemetry messages to registered sinks."""
 
-    def __init__(self, *sinks: TelemetrySink) -> None:
+    def __init__(
+        self,
+        *sinks: TelemetrySink,
+        default_context: dict[str, object] | None = None,
+    ) -> None:
         if sinks:
             self._sinks: list[TelemetrySink] = list(sinks)
         else:
             self._sinks = [LogTelemetrySink()]
+        self._default_context: dict[str, object] = dict(default_context or {})
 
     def add_sink(self, sink: TelemetrySink) -> None:
         self._sinks.append(sink)
+
+    def set_default_context(self, context: dict[str, object]) -> None:
+        self._default_context = dict(context)
+
+    def update_default_context(self, context: dict[str, object]) -> None:
+        self._default_context.update(context)
 
     def info(self, message: str, *, context: dict[str, object] | None = None) -> None:
         self._emit("INFO", message, context=context)
@@ -90,11 +101,14 @@ class TelemetryReporter:
         self._emit("ERROR", message, context=context)
 
     def _emit(self, level: str, message: str, *, context: dict[str, object] | None) -> None:
+        merged_context: dict[str, object] = dict(self._default_context)
+        if context:
+            merged_context.update(context)
         event = DiagnosticEvent(
             level=level.upper(),
             message=message,
             timestamp=datetime.now(tz=UTC),
-            context=context,
+            context=merged_context or None,
         )
         for sink in list(self._sinks):
             result = sink.emit(event)
@@ -112,6 +126,7 @@ def build_telemetry_reporter(
     log_sink: bool = True,
     event_bus: EventBus | None = None,
     file_path: Path | None = None,
+    default_context: dict[str, object] | None = None,
 ) -> TelemetryReporter:
     """Utility constructor assembling common telemetry sinks."""
 
@@ -122,4 +137,4 @@ def build_telemetry_reporter(
         sinks.append(FileTelemetrySink(file_path))
     if event_bus is not None:
         sinks.append(EventBusTelemetrySink(event_bus))
-    return TelemetryReporter(*sinks)
+    return TelemetryReporter(*sinks, default_context=default_context)

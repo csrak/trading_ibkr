@@ -97,6 +97,40 @@ class IBKRConfig(BaseSettings):
         description="Option slippage estimate in basis points (default: 20 bps)",
     )
 
+    # Alerting configuration
+    alerting_webhook: str | None = Field(
+        default=None,
+        description="Optional webhook endpoint for centralized alert delivery.",
+    )
+    alerting_verify_ssl: bool = Field(
+        default=True,
+        description="Verify TLS certificates when posting to alerting webhook.",
+    )
+    trailing_stop_alert_threshold: int = Field(
+        default=5,
+        description="Trailing stop rate-limit occurrences required to trigger an alert.",
+    )
+    trailing_stop_alert_window_seconds: int = Field(
+        default=60,
+        description="Window (seconds) for evaluating trailing stop rate-limit frequency.",
+    )
+    trailing_stop_alert_cooldown_seconds: int = Field(
+        default=120,
+        description="Cooldown (seconds) before emitting a duplicate trailing stop alert.",
+    )
+    screener_alert_stale_seconds: int = Field(
+        default=900,
+        description="Seconds without screener refresh telemetry before alerting.",
+    )
+    screener_alert_check_seconds: int = Field(
+        default=60,
+        description="Interval (seconds) for evaluating screener telemetry freshness.",
+    )
+    kill_switch_cancel_orders: bool = Field(
+        default=True,
+        description="Automatically cancel open orders when the kill switch engages.",
+    )
+
     # Data paths
     data_dir: Path = Field(default=Path("data"), description="Directory for storing data")
     log_dir: Path = Field(default=Path("logs"), description="Directory for logs")

@@ -1,5 +1,14 @@
 """Core infrastructure modules for IBKR Trader."""
 
+from .alerting import (
+    AlertMessage,
+    AlertSeverity,
+    AlertTransport,
+    LogAlertTransport,
+    TelemetryAlertConfig,
+    TelemetryAlertRouter,
+    WebhookAlertTransport,
+)
 from .config import IBKRConfig, TradingMode, load_config
 from .constants import (
     DEFAULT_CORRELATION_MATRIX_FILE,
@@ -20,6 +29,7 @@ from .events import (
     MarketDataEvent,
     OrderStatusEvent,
 )
+from .kill_switch import KillSwitch
 from .telemetry import (
     EventBusTelemetrySink,
     FileTelemetrySink,
@@ -54,4 +64,12 @@ __all__ = [
     "EventBusTelemetrySink",
     "FileTelemetrySink",
     "build_telemetry_reporter",
+    "AlertSeverity",
+    "AlertMessage",
+    "AlertTransport",
+    "LogAlertTransport",
+    "WebhookAlertTransport",
+    "TelemetryAlertConfig",
+    "TelemetryAlertRouter",
+    "KillSwitch",
 ]

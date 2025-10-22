@@ -14,6 +14,8 @@ from loguru import logger
 
 from ibkr_trader.cli_commands.utils import (
     build_portfolio_and_risk_guard,
+    build_telemetry_alert_router,
+    load_kill_switch,
     load_symbol_limit_registry,
 )
 from ibkr_trader.config import TradingMode, load_config
@@ -24,6 +26,7 @@ from ibkr_trader.constants import (
     MOCK_PRICE_SLEEP_SECONDS,
     MOCK_PRICE_VARIATION_MODULO,
 )
+from ibkr_trader.core.alerting import AlertMessage
 from ibkr_trader.data import LiquidityScreener, LiquidityScreenerConfig
 from ibkr_trader.events import (
     DiagnosticEvent,
@@ -1361,6 +1364,15 @@ async def run_strategy(
         event_bus=event_bus,
         file_path=config.log_dir / "telemetry.jsonl",
     )
+    run_label = f"{config.trading_mode.value}-run"
+    session_token = datetime.now(UTC).strftime("%Y%m%d%H%M%S")
+    session_id = f"{run_label}-{session_token}"
+    telemetry.update_default_context(
+        {
+            "run_label": run_label,
+            "session_id": session_id,
+        }
+    )
     is_graph_path = bool(config_path and str(config_path).endswith(".graph.json"))
     telemetry.info(
         "Telemetry configured for strategy run",
@@ -1372,6 +1384,34 @@ async def run_strategy(
             "graph_config": is_graph_path,
         },
     )
+    logger.info("Session ID: {}", session_id)
+    kill_switch = load_kill_switch(config)
+    if kill_switch.is_engaged():
+        state = kill_switch.status()
+        logger.error(
+            "Kill switch engaged at {} due to '{}'.",
+            state.triggered_at or "unknown",
+            state.alert_title or "unknown alert",
+        )
+        if state.context:
+            logger.error("Kill switch context: {}", state.context)
+        logger.error(
+            "Resolve using 'ibkr-trader monitoring kill-switch-clear' before restarting trading."
+        )
+        raise typer.Exit(code=1)
+
+    stop_event = asyncio.Event()
+
+    def _handle_kill(alert: AlertMessage) -> None:
+        if not stop_event.is_set():
+            logger.critical(
+                "Kill switch engaged: {} - {} (session {})",
+                alert.title,
+                alert.message,
+                session_id,
+            )
+            stop_event.set()
+
     market_data = MarketDataService(event_bus=event_bus)
     portfolio, risk_guard, symbol_limits = build_portfolio_and_risk_guard(config)
     screener_task: asyncio.Task[None] | None = None
@@ -1387,9 +1427,18 @@ async def run_strategy(
     execution_task: asyncio.Task[None] | None = None
     diagnostic_task: asyncio.Task[None] | None = None
     stream_contexts: list[AbstractAsyncContextManager[None]] = []
-    run_label = f"{config.trading_mode.value}-run"
+
+    alert_router = build_telemetry_alert_router(
+        config,
+        event_bus,
+        kill_switch=kill_switch,
+        on_kill=_handle_kill,
+        session_context={"session_id": session_id, "run_label": run_label},
+        history_path=config.log_dir / "alerts_history.jsonl",
+    )
 
     try:
+        await alert_router.start()
         # Connect to IBKR
         await broker.connect()
 
@@ -1411,6 +1460,8 @@ async def run_strategy(
                 context={
                     "graph_name": graph_config.name,
                     "strategy_count": len(graph_config.strategies),
+                    "session_id": session_id,
+                    "run_label": run_label,
                 },
             )
             symbols = sorted(
@@ -1516,12 +1567,18 @@ async def run_strategy(
             if refresh_interval and refresh_interval > 0:
 
                 async def _screener_loop() -> None:
-                    while True:
-                        await asyncio.sleep(refresh_interval)
-                        try:
-                            await strategy.refresh_universe()
-                        except Exception as exc:  # pragma: no cover - logging only
-                            logger.error("Screener refresh failed: {}", exc)
+                    try:
+                        while not stop_event.is_set():
+                            try:
+                                await asyncio.wait_for(stop_event.wait(), timeout=refresh_interval)
+                                return
+                            except TimeoutError:
+                                try:
+                                    await strategy.refresh_universe()
+                                except Exception as exc:  # pragma: no cover - logging only
+                                    logger.error("Screener refresh failed: {}", exc)
+                    except asyncio.CancelledError:
+                        raise
 
                 screener_task = asyncio.create_task(_screener_loop())
         else:
@@ -1591,7 +1648,7 @@ async def run_strategy(
 
         if config.use_mock_market_data:
             counter = 0
-            while True:
+            while not stop_event.is_set():
                 counter += 1
 
                 event_time = datetime.now(UTC)
@@ -1599,19 +1656,33 @@ async def run_strategy(
                     mock_price = MOCK_PRICE_BASE + Decimal(counter % MOCK_PRICE_VARIATION_MODULO)
                     await market_data.publish_price(symbol, mock_price, timestamp=event_time)
 
-                await asyncio.sleep(MOCK_PRICE_SLEEP_SECONDS)
+                try:
+                    await asyncio.wait_for(stop_event.wait(), timeout=MOCK_PRICE_SLEEP_SECONDS)
+                except TimeoutError:
+                    continue
         else:
-            while True:
-                await asyncio.sleep(MARKET_DATA_IDLE_SLEEP_SECONDS)
+            while not stop_event.is_set():
+                with suppress(asyncio.TimeoutError):
+                    await asyncio.wait_for(
+                        stop_event.wait(), timeout=MARKET_DATA_IDLE_SLEEP_SECONDS
+                    )
 
     except KeyboardInterrupt:
+        stop_event.set()
         logger.info("=" * 70)
         logger.warning("SHUTDOWN INITIATED BY USER")
         logger.info("=" * 70)
     except Exception as e:
+        stop_event.set()
         logger.error(f"Error during execution: {e}")
         raise
     finally:
+        stop_event.set()
+        with suppress(Exception):
+            await alert_router.stop()
+        if kill_switch.cancel_orders_enabled and kill_switch.is_engaged():
+            with suppress(Exception):
+                await broker.cancel_all_orders()
         if screener_task is not None:
             screener_task.cancel()
             with suppress(asyncio.CancelledError):

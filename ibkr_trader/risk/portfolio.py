@@ -30,6 +30,7 @@ class PortfolioSnapshot:
     total_cash: Decimal = Decimal("0")
     buying_power: Decimal = Decimal("0")
     realized_pnl_today: Decimal = Decimal("0")
+    realized_costs_today: Decimal = Decimal("0")
 
 
 class PortfolioState:
@@ -39,6 +40,7 @@ class PortfolioState:
         self,
         max_daily_loss: Decimal,
         snapshot_path: Path | None = None,
+        fee_config: FeeConfig | None = None,
     ) -> None:
         self.snapshot = PortfolioSnapshot()
         self._max_daily_loss = max_daily_loss
@@ -48,14 +50,19 @@ class PortfolioState:
         if snapshot_path is not None:
             self._load_snapshot(snapshot_path)
 
+        self._fee_config = fee_config
         self._trade_stats: dict[str, Decimal] = {
             "fills": Decimal("0"),
             "buy_volume": Decimal("0"),
             "sell_volume": Decimal("0"),
         }
         self._realized_pnl = Decimal("0")
+        self._estimated_costs_total = Decimal("0")
+        self._estimated_costs_daily = Decimal("0")
         self._symbol_pnl: dict[str, Decimal] = {}
         self._symbol_daily_pnl: dict[str, Decimal] = {}
+        self._symbol_costs: dict[str, Decimal] = {}
+        self._symbol_daily_costs: dict[str, Decimal] = {}
 
     def _find_position_locked(self, symbol: str) -> Position | None:
         """Locate position using case-insensitive symbol matching.
@@ -116,6 +123,24 @@ class PortfolioState:
             )
             self.snapshot.realized_pnl_today += pnl_delta
 
+            cost_delta = Decimal("0")
+            if self._fee_config is not None:
+                cost_delta = self._fee_config.total_cost(
+                    contract=event.contract,
+                    side=event.side,
+                    quantity=event.quantity,
+                    price=event.price,
+                )
+                self._estimated_costs_total += cost_delta
+                self._estimated_costs_daily += cost_delta
+                self._symbol_costs[symbol] = (
+                    self._symbol_costs.get(symbol, Decimal("0")) + cost_delta
+                )
+                self._symbol_daily_costs[symbol] = (
+                    self._symbol_daily_costs.get(symbol, Decimal("0")) + cost_delta
+                )
+                self.snapshot.realized_costs_today += cost_delta
+
     async def check_daily_loss_limit(self) -> None:
         async with self._lock:
             today = datetime.now(UTC).date()
@@ -144,6 +169,7 @@ class PortfolioState:
                 total_cash=Decimal(decoded.get("total_cash", "0")),
                 buying_power=Decimal(decoded.get("buying_power", "0")),
                 realized_pnl_today=Decimal(decoded.get("realized_pnl_today", "0")),
+                realized_costs_today=Decimal(decoded.get("realized_costs_today", "0")),
             )
             trade_stats = decoded.get("trade_stats") or {}
             self._trade_stats = {
@@ -152,8 +178,12 @@ class PortfolioState:
                 "sell_volume": Decimal(trade_stats.get("sell_volume", "0")),
             }
             self._realized_pnl = Decimal(decoded.get("realized_pnl", "0"))
+            self._estimated_costs_total = Decimal(decoded.get("estimated_costs_total", "0"))
+            self._estimated_costs_daily = Decimal(decoded.get("estimated_costs_daily", "0"))
             symbol_pnl = decoded.get("symbol_pnl") or {}
             self._symbol_pnl = {symbol: Decimal(value) for symbol, value in symbol_pnl.items()}
+            symbol_costs = decoded.get("symbol_costs") or {}
+            self._symbol_costs = {symbol: Decimal(value) for symbol, value in symbol_costs.items()}
             logger.info("Loaded portfolio snapshot from {}", path)
         except Exception as exc:  # pragma: no cover - only on IO failure
             logger.warning("Failed to load portfolio snapshot: {}", exc)
@@ -167,9 +197,15 @@ class PortfolioState:
                 "total_cash": str(self.snapshot.total_cash),
                 "buying_power": str(self.snapshot.buying_power),
                 "realized_pnl_today": str(self.snapshot.realized_pnl_today),
+                "realized_costs_today": str(self.snapshot.realized_costs_today),
                 "trade_stats": {key: str(value) for key, value in self._trade_stats.items()},
                 "realized_pnl": str(self._realized_pnl),
+                "estimated_costs_total": str(self._estimated_costs_total),
+                "estimated_costs_daily": str(self._estimated_costs_daily),
                 "symbol_pnl": {symbol: str(value) for symbol, value in self._symbol_pnl.items()},
+                "symbol_costs": {
+                    symbol: str(value) for symbol, value in self._symbol_costs.items()
+                },
                 "positions": {
                     symbol: position.model_dump(mode="json")
                     for symbol, position in self.snapshot.positions.items()
@@ -192,6 +228,24 @@ class PortfolioState:
     async def per_symbol_pnl(self) -> dict[str, str]:
         async with self._lock:
             return {symbol: str(value) for symbol, value in self._symbol_pnl.items()}
+
+    async def estimated_costs_total(self) -> str:
+        async with self._lock:
+            return str(self._estimated_costs_total)
+
+    async def estimated_costs_daily(self) -> str:
+        async with self._lock:
+            return str(self._estimated_costs_daily)
+
+    async def realized_pnl_net(self) -> str:
+        async with self._lock:
+            net = self._realized_pnl - self._estimated_costs_total
+            return str(net)
+
+    async def realized_pnl_net_daily(self) -> str:
+        async with self._lock:
+            net = self.snapshot.realized_pnl_today - self.snapshot.realized_costs_today
+            return str(net)
 
     async def position_quantity(self, symbol: str) -> int:
         async with self._lock:
@@ -219,7 +273,10 @@ class PortfolioState:
         if self._loss_check_date != current_date:
             self._loss_check_date = current_date
             self.snapshot.realized_pnl_today = Decimal("0")
+            self.snapshot.realized_costs_today = Decimal("0")
+            self._estimated_costs_daily = Decimal("0")
             self._symbol_daily_pnl.clear()
+            self._symbol_daily_costs.clear()
 
 
 class SymbolLimits(BaseModel):

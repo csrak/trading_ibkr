@@ -211,6 +211,20 @@ class MyStrategyWithTrailing(BaseStrategy):
             )
 ```
 
+### Telemetry & Health Monitoring
+
+Trailing stops now emit structured telemetry so operators can audit health across sessions:
+
+- `trailing_stop.created` / `activated` / `updated` / `cancelled` include stop id, symbol, mode (amount vs percent), and last stop price. These events flow to the telemetry reporter you wire into `TrailingStopManager` and surface inside `logs/telemetry.jsonl` by default.
+- `trailing_stop.rate_limited` warns when IBKR throttle rules suppress a modification for a symbol. If you see sustained warnings, increase the trailing interval or review market volatility.
+- On restart the manager loads existing stops, restores last stop prices, activation state, and rate limiter windows, then emits `trailing_stop.manager.restored` with a summary of recovered symbols. Use this event to confirm resilience during planned restarts.
+
+Rate-limit bursts now automatically escalate through the central alerting stack. Configure the thresholds with `IBKR_TRAILING_STOP_ALERT_THRESHOLD` and `IBKR_TRAILING_STOP_ALERT_WINDOW_SECONDS` (default 5 events within 60 seconds). When the threshold is tripped the on-call rotation receives a warning with the affected stop id and symbol so throttled orders can be investigated immediately.
+
+If a throttling incident escalates to a CRITICAL alert (or other CRITICAL telemetry fires), the kill switch engages automatically—halting strategies gracefully, cancelling new orders, and requiring an operator acknowledgement before trading resumes.
+
+To capture telemetry in your own automation, instantiate `TrailingStopManager` with a `TelemetryReporter` sink (e.g. S3, Kafka, or Prometheus bridge) so you can alert on stale stops or repeated rate limits.
+
 ## Best Practices
 
 ### 1. Choose Appropriate Trail Distance

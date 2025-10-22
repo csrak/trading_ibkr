@@ -64,13 +64,17 @@ Launches a full-screen terminal dashboard that updates in real-time (2Hz refresh
 │                     │                                    │
 │  Net Liquidation:   │  Symbol  Qty  AvgPrice  P&L       │
 │  $50,000.00         │  AAPL    10   $150.00  +$50.00   │
-│                     │  MSFT    -5   $300.00  -$25.00   │
-│  Realized P&L:      │                                    │
-│  +$125.50           ├────────────────────────────────────┤
-│                     │  Recent Activity                   │
-│  Risk Status:       │                                    │
-│  OK (15%)           │  14:30:42  FILL   AAPL  BUY 10    │
-│                     │  14:30:40  ORDER  AAPL  SUBMITTED │
+│  Cash:              │  MSFT    -5   $300.00  -$25.00   │
+│  $25,000.00         │                                    │
+│  Buying Power:      ├────────────────────────────────────┤
+│  $75,000.00         │  Screener Universe                 │
+│  Gross Realized:    │  AAPL                              │
+│  +$125.50           │  MSFT                              │
+│  Estimated Costs:   │  Last refresh: 14:30:30 UTC        │
+│  -$3.50             ├────────────────────────────────────┤
+│  Net Realized:      │  Recent Activity                   │
+│  +$122.00           │  14:30:42  FILL   AAPL  BUY 10    │
+│  Kill Switch: OK    │  14:30:40  ORDER  AAPL  SUBMITTED │
 └─────────────────────┴────────────────────────────────────┘
 │  Ctrl+C: Exit  |  Auto-refresh: 2Hz                     │
 └──────────────────────────────────────────────────────────┘
@@ -83,15 +87,19 @@ Launches a full-screen terminal dashboard that updates in real-time (2Hz refresh
 **Displays:**
 - **Net Liquidation**: Total account value
 - **Cash**: Available cash balance
-- **Buying Power**: Margin buying power
-- **Realized P&L (Today)**: Profit/loss from closed positions
-- **Unrealized P&L**: Profit/loss from open positions
-- **Risk Status**: Daily loss limit indicator
+- **Buying Power**: Margin headroom for new trades
+- **Gross Realized P&L**: Realized profit/loss before costs (today)
+- **Estimated Costs**: Commission + slippage estimates (requires `enable_fee_estimates=true`)
+- **Net Realized P&L**: Gross realized minus estimated costs
+- **Unrealized P&L**: P&L from open positions
+- **Risk Status**: Daily loss budget utilisation
+- **Kill Switch Buffer**: Remaining loss allowance before the intra-day kill switch triggers
 
 **Risk Status Colors:**
-- 🟢 **OK** (< 80%): Normal operation
-- 🟡 **WARNING** (80-90%): Approaching daily loss limit
-- 🔴 **CRITICAL** (≥ 90%): Near or at daily loss limit
+- 🟢 **OK** (< 80% of loss budget consumed): Normal operation
+- 🟡 **ARMED** (80-99% consumed): Approaching kill-switch threshold
+- 🔴 **TRIGGERED** (≥ 100% consumed): Kill switch should halt new orders
+- ⚪ **DISABLED**: Kill switch inactive (max daily loss is zero)
 
 #### 2. Positions Panel (Top Right)
 
@@ -109,7 +117,23 @@ Launches a full-screen terminal dashboard that updates in real-time (2Hz refresh
 - 🟡 Yellow ⚠: Position size 80-90% of limit
 - 🔴 Red ⚠: Position size ≥ 90% of limit (orders blocked at 100%)
 
-#### 3. Activity Feed (Bottom Right)
+#### 3. Screener Panel (Middle Right)
+
+**Displays:**
+- Latest screener universe delivered via telemetry (`*.screen_refresh`)
+- Timestamp of the last successful refresh (UTC)
+
+Use this panel to verify adaptive strategies actually received fresh universes. If the timestamp stalls or the list is empty, investigate screener telemetry for errors.
+
+#### 4. Alerts Panel (Lower Right)
+
+**Displays:**
+- Most recent WARNING/CRITICAL/INFO alerts emitted via the telemetry alert router
+- Timestamps and severity coloring for quick triage
+
+Use this panel to verify that alert drills (or real issues) are propagating while the dashboard is open.
+
+#### 5. Activity Feed (Bottom Right)
 
 **Shows last 15 events:**
 - **ORDER**: Order status changes (SUBMITTED, FILLED, CANCELLED)
@@ -139,6 +163,31 @@ ibkr-trader dashboard
 # Press Ctrl+C to exit
 ```
 
+#### Fire a Synthetic Alert Drill
+
+```bash
+# Emit test telemetry to verify alert routing (uses current IBKR_* settings)
+ibkr-trader monitoring test-alerts --rate-limit-events 5 --screener-namespace adaptive_momentum
+```
+
+```bash
+# View persisted alert history (newest last)
+ibkr-trader monitoring alert-history --limit 10
+```
+
+```bash
+# Tail alerts live (Ctrl+C to stop)
+ibkr-trader monitoring alert-history --follow --limit 5
+
+# Filter WARN/CRITICAL alerts for a given session
+ibkr-trader monitoring alert-history --severity warning --severity critical --session-id paper-run-20250101
+
+# Filter by alert source and emit compact JSON
+ibkr-trader monitoring alert-history --source synthetic_alerts --json --limit 5
+```
+
+This command sends a burst of `trailing_stop.rate_limited` telemetry and (optionally) a screener refresh plus stall. Confirm the resulting WARNING/CRITICAL notifications appear in PagerDuty/Slack before trusting the integration in production.
+
 #### Verbose Mode (Debug)
 
 ```bash
@@ -157,6 +206,21 @@ ibkr-trader dashboard --verbose
 - **Market Data**: Requires IBKR market data subscriptions for live prices
 - **Position Limit**: Optimized for < 20 positions (more will scroll)
 - **Connection**: Dashboard exits if IBKR connection drops
+
+### Central Alerting
+
+Telemetry now feeds an alert router that watches for:
+- **Trailing stop throttling** – Raises a `WARNING` when `trailing_stop.rate_limited` fires more than `IBKR_TRAILING_STOP_ALERT_THRESHOLD` times inside `IBKR_TRAILING_STOP_ALERT_WINDOW_SECONDS` (defaults: 5 events / 60 seconds). A cooldown (`IBKR_TRAILING_STOP_ALERT_COOLDOWN_SECONDS`) prevents duplicate pages.
+- **Screener stalls** – Sends a `CRITICAL` alert when no `*.screen_refresh` telemetry arrives for longer than `IBKR_SCREENER_ALERT_STALE_SECONDS` (default: 15 minutes). A recovery `INFO` alert is emitted once telemetry resumes.
+- **Kill switch automation** – CRITICAL alerts automatically engage the persistent kill switch, trigger graceful strategy shutdown, and block subsequent runs until operators acknowledge the issue.
+
+Alerts are delivered to `IBKR_ALERTING_WEBHOOK` if configured; otherwise they are logged locally. Set `IBKR_ALERTING_VERIFY_SSL=false` when pointing at internal HTTPS endpoints with self-signed certificates.
+
+**Operator workflow:**
+- Check status: `ibkr-trader monitoring kill-switch-status`
+- Review outstanding orders; the platform automatically cancels any remaining orders when the switch engages (configurable via `IBKR_KILL_SWITCH_CANCEL_ORDERS`).
+- Once mitigated, acknowledge and clear: `ibkr-trader monitoring kill-switch-clear --note "Investigated"`
+- Resume trading only after the kill switch reports `Engaged: False`.
 
 ---
 

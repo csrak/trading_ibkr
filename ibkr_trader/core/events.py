@@ -22,6 +22,7 @@ class EventTopic(str, Enum):
     EXECUTION = "execution"
     DIAGNOSTIC = "diagnostic"
     ORDER_BOOK = "order_book"  # L2 market depth updates
+    ALERT = "alert"
 
 
 @dataclass(frozen=True, slots=True)

@@ -22,4 +22,5 @@ __all__ = [
     "ExecutionEvent",
     "MarketDataEvent",
     "OrderStatusEvent",
+    "EventTopic",
 ]
